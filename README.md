@@ -48,37 +48,36 @@ npm run preview
 
 ## Backend Setup
 
-The frontend is already prepared to connect to a CSV + SQLite backend.
+The frontend is already prepared to connect to a PokéAPI-cached CSV + Supabase backend.
 
 ### Expected API Base URL
 
-Set this environment variable in the frontend project:
+Set these environment variables in the frontend project:
 
 ```env
-VITE_API_BASE_URL=http://localhost:3000
+VITE_SUPABASE_URL=https://your-project-ref.supabase.co
+VITE_SUPABASE_ANON_KEY=your_anon_key
 ```
 
-If this is not set, the UI runs in local fallback mode.
+If the API URL is not set, the UI can infer the Supabase URL from the anon key project ref.
 
 ### Expected Backend Responsibilities
 
-- Load Pokemon data from the assigned CSV file
-- Store predictions in SQLite
-- Store ground truth results in SQLite
-- Return saved match history and stats through API endpoints
+- Load Pokemon data from the PokéAPI-cached CSV file
+- Store predictions in Supabase
+- Store ground truth results in Supabase
+- Return saved match history and stats through Supabase tables/views
 - Accept screenshot proof uploads for battle logging
+- Auto-generate battle predictions from matchup data and cached PokéAPI records
 
 ### Suggested Backend Endpoints
 
-- `GET /api/predictions`
-- `POST /api/predictions`
-- `POST /api/ground-truth`
-- `GET /api/history`
-- `GET /api/stats`
+- `battles` table
+- `audit_log` table
 
 ## Notes
 
 - The frontend currently uses a local fallback mode if the backend is not available.
 - Screenshot proof is handled as a real file upload in the UI.
-- The app is structured so it can be connected to SQLite without redesigning the interface.
+- The app is structured so it can be connected to Supabase without redesigning the interface.
 

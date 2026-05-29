@@ -2,6 +2,9 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   isBackendConfigured,
   loadBattles,
+  loadMetrics,
+  loadAuditLog,
+  safeBuildBattlePrediction,
   nextMatchId,
   toDisplayBattle,
   toGroundTruthPayload,
@@ -108,6 +111,8 @@ const tabs = [
   { id: 'predict', label: 'Predict', icon: LightningIcon },
   { id: 'groundTruth', label: 'Ground Truth', icon: SwordsIcon },
   { id: 'history', label: 'History', icon: BookIcon },
+  { id: 'analytics', label: 'Analytics', icon: ChartIcon },
+  { id: 'auditLog', label: 'Audit Log', icon: ShieldIcon },
 ];
 
 function normalizeMatchId(value) {
@@ -116,6 +121,15 @@ function normalizeMatchId(value) {
     .toLowerCase()
     .replace(/^#/, '')
     .replace(/[^a-z0-9]+/g, '');
+}
+
+function toConfidenceValue(value, fallback = 0.5) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+
+  return Math.min(1, Math.max(0, parsed));
 }
 
 function getBattleMatchKeys(battle) {
@@ -153,14 +167,47 @@ function findBattleByMatchId(battles, matchId) {
   });
 }
 
+function calculateLocalMetrics(battles) {
+  const resolvedBattles = battles.filter((battle) => battle.actualWinner && battle.predictedWinner);
+  const tp = resolvedBattles.filter(
+    (battle) => battle.predictedWinner === battle.battlerA && battle.actualWinner === battle.battlerA,
+  ).length;
+  const fp = resolvedBattles.filter(
+    (battle) => battle.predictedWinner === battle.battlerA && battle.actualWinner === battle.battlerB,
+  ).length;
+  const fn = resolvedBattles.filter(
+    (battle) => battle.predictedWinner === battle.battlerB && battle.actualWinner === battle.battlerA,
+  ).length;
+  const tn = resolvedBattles.filter(
+    (battle) => battle.predictedWinner === battle.battlerB && battle.actualWinner === battle.battlerB,
+  ).length;
+  const total = resolvedBattles.length;
+  const correct = resolvedBattles.filter((battle) => battle.predictedWinner === battle.actualWinner).length;
+  const precisionRate = tp + fp ? tp / (tp + fp) : 0;
+  const recallRate = tp + fn ? tp / (tp + fn) : 0;
+
+  return {
+    total_battles: total,
+    correct,
+    tp,
+    fp,
+    fn,
+    tn,
+    accuracy_pct: total ? Math.round((correct / total) * 100) : 0,
+    precision_pct: Math.round(precisionRate * 100),
+    recall_pct: Math.round(recallRate * 100),
+    f1_pct: Math.round(((precisionRate + recallRate) ? (2 * precisionRate * recallRate) / (precisionRate + recallRate) : 0) * 100),
+  };
+}
+
 function App() {
   const [activeTab, setActiveTab] = useState('predict');
   const [predictions, setPredictions] = useState(initialPredictions);
   const [syncStatus, setSyncStatus] = useState(isBackendConfigured() ? 'connecting' : 'local');
   const [syncMessage, setSyncMessage] = useState(
     isBackendConfigured()
-      ? 'Connecting to SQLite backend...'
-      : 'Local draft mode. Configure VITE_API_BASE_URL to connect SQLite-backed APIs.',
+      ? 'Connecting to backend...'
+      : 'Local draft mode. Configure VITE_API_BASE_URL or Supabase env vars to connect the backend.',
   );
   const [isSavingPrediction, setIsSavingPrediction] = useState(false);
   const [isSavingGroundTruth, setIsSavingGroundTruth] = useState(false);
@@ -194,16 +241,19 @@ function App() {
     finalScore: '',
     mvp: '',
   });
+  const [metrics, setMetrics] = useState(null);
+  const [auditLog, setAuditLog] = useState([]);
+  const [isLoadingMetrics, setIsLoadingMetrics] = useState(false);
+  const [isLoadingAudit, setIsLoadingAudit] = useState(false);
 
-  const totalBattles = predictions.length;
-  const correctBattles = predictions.filter(
-    (battle) => battle.actualWinner && battle.actualWinner === battle.predictedWinner,
-  ).length;
-  const loggedBattles = predictions.filter((battle) => battle.actualWinner).length;
-  const accuracy = loggedBattles ? Math.round((correctBattles / loggedBattles) * 100) : 0;
-  const precision = loggedBattles ? Math.round((correctBattles / loggedBattles) * 100) : 0;
-  const recall = loggedBattles ? Math.round((correctBattles / loggedBattles) * 100) : 0;
-  const f1Score = loggedBattles ? Math.round((correctBattles / loggedBattles) * 100) : 0;
+  const localMetrics = useMemo(() => calculateLocalMetrics(predictions), [predictions]);
+  const metricsSnapshot = metrics ?? localMetrics;
+  const totalBattles = metricsSnapshot.total_battles ?? predictions.length;
+  const correctBattles = metricsSnapshot.correct ?? 0;
+  const accuracy = metricsSnapshot.accuracy_pct ?? 0;
+  const precision = metricsSnapshot.precision_pct ?? 0;
+  const recall = metricsSnapshot.recall_pct ?? 0;
+  const f1Score = metricsSnapshot.f1_pct ?? 0;
   const pendingBattles = predictions.filter((battle) => !battle.actualWinner);
 
   const selectedBattle = findBattleByMatchId(predictions, truthForm.matchId) ?? null;
@@ -221,7 +271,7 @@ function App() {
 
     setTruthForm((current) => ({
       ...current,
-      actualWinner: selectedBattle.actualWinner || selectedBattle.predictedWinner,
+      actualWinner: selectedBattle.actualWinner || '',
       replayLink: selectedBattle.replayLink || '',
       screenshotPreview: selectedBattle.screenshotPreview || '',
       screenshotName: selectedBattle.screenshotName || '',
@@ -245,7 +295,7 @@ function App() {
         if (!isMounted || !records.length) {
           if (isMounted) {
             setSyncStatus('connected');
-            setSyncMessage('SQLite backend connected. No saved battles yet.');
+            setSyncMessage('Backend connected. No saved battles yet.');
           }
           return;
         }
@@ -255,13 +305,13 @@ function App() {
         setTruthForm((current) => ({
           ...current,
           matchId: normalized[0]?.id ?? current.matchId,
-          actualWinner: normalized[0]?.actualWinner || normalized[0]?.predictedWinner || current.actualWinner,
+          actualWinner: normalized[0]?.actualWinner || current.actualWinner || '',
           replayLink: normalized[0]?.replayLink || '',
           screenshotPreview: normalized[0]?.screenshotPreview || '',
           screenshotName: normalized[0]?.screenshotName || '',
         }));
         setSyncStatus('connected');
-        setSyncMessage('SQLite backend connected and battle records loaded.');
+        setSyncMessage('Backend connected and battle records loaded.');
       } catch (error) {
         if (!isMounted) {
           return;
@@ -295,10 +345,12 @@ function App() {
       hour: 'numeric',
       minute: '2-digit',
     });
+    const enginePrediction = safeBuildBattlePrediction(predictionForm, predictions);
     const payload = toPredictionPayload({
       form: predictionForm,
       matchId,
       timestamp,
+      prediction: enginePrediction,
     });
     const localBattle = toDisplayBattle({
       ...payload,
@@ -339,7 +391,7 @@ function App() {
       setTruthForm((current) => ({
         ...current,
         matchId: finalBattle.id,
-        actualWinner: finalBattle.predictedWinner,
+        actualWinner: '',
       }));
       setPredictionNotice('');
       setActiveTab('predict');
@@ -359,13 +411,13 @@ function App() {
         reason: '',
       }));
       setSyncStatus(isBackendConfigured() ? 'connected' : 'local');
-      setSyncMessage(isBackendConfigured() ? 'Prediction saved to SQLite backend.' : 'Prediction saved locally.');
+      setSyncMessage(isBackendConfigured() ? 'Prediction saved to backend.' : 'Prediction saved locally.');
     } catch (error) {
       setPredictions((current) => [localBattle, ...current.filter((battle) => battle.id !== localBattle.id)]);
       setTruthForm((current) => ({
         ...current,
         matchId: localBattle.id,
-        actualWinner: localBattle.predictedWinner,
+        actualWinner: '',
       }));
       setPredictionNotice('');
       setActiveTab('predict');
@@ -386,6 +438,7 @@ function App() {
       }));
       setSyncStatus('fallback');
       setSyncMessage('Backend save failed. Kept the prediction locally.');
+      setPredictionNotice(`Save failed: ${String(error?.message ?? error)}`);
     } finally {
       setIsSavingPrediction(false);
     }
@@ -456,7 +509,7 @@ function App() {
       setSyncStatus(isBackendConfigured() ? 'connected' : 'local');
       setSyncMessage(
         isBackendConfigured()
-          ? 'Ground truth saved to SQLite backend.'
+          ? 'Ground truth saved to backend.'
           : 'Ground truth saved locally.',
       );
     } catch (error) {
@@ -515,8 +568,20 @@ function App() {
               <div className="font-display text-xl font-bold uppercase tracking-[0.18em] text-arena-400 md:text-2xl">
                 Battle Predictor
               </div>
-              <div className="font-mono text-[10px] uppercase tracking-[0.45em] text-slate-400 md:text-xs">
+              <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.45em] text-slate-400 md:text-xs">
                 Engine 3 - Pokemon Showdown
+                <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-bold ${
+                  syncStatus === 'connected' ? 'bg-emerald-400/15 text-emerald-400' :
+                  syncStatus === 'connecting' ? 'bg-amber-400/15 text-amber-400' :
+                  'bg-red-400/15 text-red-400'
+                }`}>
+                  <span className={`h-1.5 w-1.5 rounded-full ${
+                    syncStatus === 'connected' ? 'bg-emerald-400' :
+                    syncStatus === 'connecting' ? 'bg-amber-400' :
+                    'bg-red-400'
+                  }`} />
+                  {syncStatus === 'connected' ? 'Supabase' : syncStatus === 'connecting' ? 'Connecting' : 'Local'}
+                </span>
               </div>
             </div>
           </div>
@@ -596,6 +661,39 @@ function App() {
             battles={resolvedHistory}
           />
         ) : null}
+
+        {activeTab === 'analytics' ? (
+          <AnalyticsView
+            metrics={metrics}
+            isLoading={isLoadingMetrics}
+            predictions={predictions}
+            onRefresh={async () => {
+              if (!isBackendConfigured()) return;
+              setIsLoadingMetrics(true);
+              try {
+                const m = await loadMetrics();
+                setMetrics(m);
+              } catch (e) { console.warn('Metrics load failed:', e); }
+              finally { setIsLoadingMetrics(false); }
+            }}
+          />
+        ) : null}
+
+        {activeTab === 'auditLog' ? (
+          <AuditLogView
+            auditLog={auditLog}
+            isLoading={isLoadingAudit}
+            onRefresh={async () => {
+              if (!isBackendConfigured()) return;
+              setIsLoadingAudit(true);
+              try {
+                const logs = await loadAuditLog();
+                setAuditLog(logs);
+              } catch (e) { console.warn('Audit load failed:', e); }
+              finally { setIsLoadingAudit(false); }
+            }}
+          />
+        ) : null}
       </main>
     </div>
   );
@@ -615,7 +713,7 @@ function PredictViewLegacy({ form, setForm, predictions, onGenerate }) {
             </p>
           </div>
           <span className="rounded-full border border-arena-400/25 bg-arena-400/10 px-3 py-1 font-mono text-xs font-bold text-arena-400">
-            #{String(predictions.length + 1).padStart(3, '0')}
+            #{nextMatchId(predictions)}
           </span>
         </div>
 
@@ -757,10 +855,7 @@ function PredictView({
   recall,
   f1Score,
 }) {
-  const outputWinner =
-    form.predictedWinnerSide === 'challenger'
-      ? form.challengerName || 'Challenger'
-      : form.gymLeaderName || 'Gym Leader';
+  const enginePrediction = safeBuildBattlePrediction(form, predictions);
   const timestamp = new Date().toLocaleString('en-US', {
     month: 'short',
     day: 'numeric',
@@ -782,7 +877,7 @@ function PredictView({
             </p>
           </div>
           <span className="rounded-full border border-arena-400/25 bg-arena-400/10 px-3 py-1 font-mono text-xs font-bold text-arena-400">
-            #{String(predictions.length + 1).padStart(3, '0')}
+            #{nextMatchId(predictions)}
           </span>
         </div>
 
@@ -800,9 +895,10 @@ function PredictView({
           <div className="grid gap-4 md:grid-cols-2">
             <TextField
               label="Match ID"
-              value={form.matchId}
+              value={form.matchId || nextMatchId(predictions)}
               onChange={(value) => setForm((current) => ({ ...current, matchId: value }))}
-              placeholder="customID"
+              placeholder="Auto-generated"
+              readOnly
             />
             <TextField
               label="Engine/s Used"
@@ -896,44 +992,66 @@ function PredictView({
           </div>
 
           <div className="mt-4">
-            <label className="mb-2 block font-mono text-xs uppercase tracking-[0.32em] text-slate-400">
-              Predicted Winner
-            </label>
-            <div className="grid gap-3 md:grid-cols-2">
-              {[
-                { side: 'gymLeader', label: 'Gym Leader' },
-                { side: 'challenger', label: 'Challenger' },
-              ].map((option) => (
-                <button
-                  key={option.side}
-                  type="button"
-                  onClick={() =>
-                    setForm((current) => ({ ...current, predictedWinnerSide: option.side }))
-                  }
-                  className={`rounded-2xl border px-4 py-4 font-display text-base font-bold transition ${
-                    form.predictedWinnerSide === option.side
-                      ? 'border-arena-400/60 bg-arena-400/10 text-arena-400 shadow-glow'
-                      : 'border-white/10 bg-white/5 text-slate-200 hover:border-arena-400/35 hover:bg-arena-400/5'
-                  }`}
-                >
-                  {option.label}
-                </button>
-              ))}
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <label className="block font-mono text-xs uppercase tracking-[0.32em] text-slate-400">
+                Predicted Winner
+              </label>
+              <span className="rounded-full border border-arena-400/30 bg-arena-400/10 px-3 py-1 font-mono text-[10px] font-bold uppercase tracking-[0.28em] text-arena-400">
+                Auto
+              </span>
+            </div>
+            <div className="rounded-2xl border border-arena-400/20 bg-arena-400/5 p-4">
+              <p className="font-display text-lg font-bold text-slate-100">
+                {enginePrediction.predictedWinnerName || 'Pending'}
+              </p>
+              <p className="mt-2 font-mono text-xs leading-5 text-slate-400">
+                Generated from the matchup inputs, cached PokéAPI data, and rule-based scoring.
+              </p>
+              <p className="mt-2 font-mono text-xs leading-5 text-slate-300">
+                {enginePrediction.reason}
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2 font-mono text-[11px] uppercase tracking-[0.24em] text-slate-300">
+                <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1">
+                  Confidence {enginePrediction.confidence}%
+                </span>
+                <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1">
+                  Model {enginePrediction.model}
+                </span>
+              </div>
             </div>
           </div>
 
           <div className="mt-4">
             <label className="mb-2 block font-mono text-xs uppercase tracking-[0.32em] text-slate-400">
-              Prediction Reason / Key Features
+              Analyst Note / Extra Context (Optional)
             </label>
             <textarea
               rows={5}
               value={form.reason}
               onChange={(event) => setForm((current) => ({ ...current, reason: event.target.value }))}
-              placeholder="Type advantage, speed tier, entry hazard pressure, and win conditions..."
+              placeholder="Add any extra context you want saved with the engine prediction..."
               className="w-full resize-none rounded-2xl border border-arena-400/25 bg-slate-950/50 px-4 py-3 font-mono text-sm leading-6 text-slate-200 outline-none transition placeholder:text-slate-500 focus:border-arena-400 focus:ring-2 focus:ring-arena-400/20"
             />
           </div>
+
+          {enginePrediction.validationNotes.length ? (
+            <div
+              className={`mt-4 rounded-2xl border px-4 py-3 font-mono text-xs leading-5 ${
+                enginePrediction.validationCheck
+                  ? 'border-emerald-400/20 bg-emerald-400/10 text-emerald-200'
+                  : 'border-amber-400/20 bg-amber-400/10 text-amber-200'
+              }`}
+            >
+              <p className="mb-1 font-bold uppercase tracking-[0.28em]">
+                {enginePrediction.validationCheck ? 'Validation check passed' : 'Validation check warning'}
+              </p>
+              <ul className="list-disc space-y-1 pl-5">
+                {enginePrediction.validationNotes.map((note) => (
+                  <li key={note}>{note}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
         </div>
 
         <button
@@ -1422,6 +1540,7 @@ function PredictionCard({ battle }) {
   const gymLeaderName = battle.gymLeaderName || battle.battlerA || 'Gym Leader';
   const challengerName = battle.challengerName || battle.battlerB || 'Challenger';
   const predictedWinner = battle.predictedWinner || battle.actualWinner || 'Pending';
+  const confidence = toConfidenceValue(battle.confidence, 0.5);
 
   return (
     <article className="glass-panel rounded-[24px] p-5 shadow-soft transition hover:-translate-y-0.5 hover:border-arena-400/35">
@@ -1471,12 +1590,12 @@ function PredictionCard({ battle }) {
       <div className="mt-5">
         <div className="mb-2 flex items-center justify-between font-mono text-xs uppercase tracking-[0.3em] text-slate-400">
           <span>Confidence</span>
-          <span className="text-arena-400">{Math.round(battle.confidence * 100)}%</span>
+          <span className="text-arena-400">{Math.round(confidence * 100)}%</span>
         </div>
         <div className="h-3 rounded-full bg-white/10">
           <div
             className="h-3 rounded-full bg-gradient-to-r from-arena-300 via-arena-400 to-arena-100 shadow-[0_0_20px_rgba(255,215,0,0.35)]"
-            style={{ width: `${battle.confidence * 100}%` }}
+            style={{ width: `${confidence * 100}%` }}
           />
         </div>
       </div>
@@ -1509,6 +1628,7 @@ function ResultCard({ battle }) {
   const gymLeaderName = battle.gymLeaderName || battle.battlerA || 'Gym Leader';
   const challengerName = battle.challengerName || battle.battlerB || 'Challenger';
   const predictedWinner = battle.predictedWinner || battle.actualWinner || 'Pending';
+  const confidence = toConfidenceValue(battle.confidence, 0.5);
 
   return (
     <article className="glass-panel rounded-[24px] p-5 shadow-soft transition hover:-translate-y-0.5">
@@ -1538,12 +1658,12 @@ function ResultCard({ battle }) {
       <div className="mt-5">
         <div className="mb-2 flex items-center justify-between font-mono text-xs uppercase tracking-[0.3em] text-slate-400">
           <span>Confidence</span>
-          <span className="text-arena-400">{Math.round(battle.confidence * 100)}%</span>
+          <span className="text-arena-400">{Math.round(confidence * 100)}%</span>
         </div>
         <div className="h-3 rounded-full bg-white/10">
           <div
             className="h-3 rounded-full bg-gradient-to-r from-arena-300 via-arena-400 to-arena-100 shadow-[0_0_20px_rgba(255,215,0,0.35)]"
-            style={{ width: `${battle.confidence * 100}%` }}
+            style={{ width: `${confidence * 100}%` }}
           />
         </div>
       </div>
@@ -1589,6 +1709,7 @@ function HistoryCard({ battle }) {
   const gymLeaderName = battle.gymLeaderName || battle.battlerA || 'Gym Leader';
   const challengerName = battle.challengerName || battle.battlerB || 'Challenger';
   const predictedWinner = battle.predictedWinner || battle.actualWinner || 'Pending';
+  const confidence = toConfidenceValue(battle.confidence, 0.5);
 
   return (
     <article className="glass-panel rounded-[24px] p-5 shadow-soft">
@@ -1632,12 +1753,12 @@ function HistoryCard({ battle }) {
       <div className="mt-5">
         <div className="mb-2 flex items-center justify-between font-mono text-xs uppercase tracking-[0.3em] text-slate-400">
           <span>Confidence</span>
-          <span className="text-arena-400">{Math.round(battle.confidence * 100)}%</span>
+          <span className="text-arena-400">{Math.round(confidence * 100)}%</span>
         </div>
         <div className="h-3 rounded-full bg-white/10">
           <div
             className="h-3 rounded-full bg-gradient-to-r from-arena-300 via-arena-400 to-arena-100 shadow-[0_0_20px_rgba(255,215,0,0.35)]"
-            style={{ width: `${battle.confidence * 100}%` }}
+            style={{ width: `${confidence * 100}%` }}
           />
         </div>
       </div>
@@ -1671,7 +1792,7 @@ function HistoryCard({ battle }) {
   );
 }
 
-function TextField({ label, value, onChange, placeholder, type = 'text', compact = false }) {
+function TextField({ label, value, onChange, placeholder, type = 'text', compact = false, readOnly = false }) {
   return (
     <label className="block">
       <span className="mb-2 block min-h-[2.5rem] font-mono text-xs uppercase leading-5 tracking-[0.28em] text-slate-400">
@@ -1682,9 +1803,10 @@ function TextField({ label, value, onChange, placeholder, type = 'text', compact
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
+        readOnly={readOnly}
         className={`w-full rounded-2xl border border-arena-400/25 bg-slate-950/50 px-4 ${
           compact ? 'py-2.5' : 'py-3'
-        } font-display text-base text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-arena-400 focus:ring-2 focus:ring-arena-400/20`}
+        } font-display text-base text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-arena-400 focus:ring-2 focus:ring-arena-400/20 ${readOnly ? 'cursor-not-allowed opacity-80' : ''}`}
       />
     </label>
   );
@@ -1863,14 +1985,201 @@ function BookIcon({ className }) {
 function DocumentIcon({ className }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
-      <path
-        d="M7 3.5h7l5 5V20.5A1.5 1.5 0 0 1 17.5 22h-10A1.5 1.5 0 0 1 6 20.5v-15A1.5 1.5 0 0 1 7.5 4H7Z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-      />
+      <path d="M7 3.5h7l5 5V20.5A1.5 1.5 0 0 1 17.5 22h-10A1.5 1.5 0 0 1 6 20.5v-15A1.5 1.5 0 0 1 7.5 4H7Z" stroke="currentColor" strokeWidth="1.8" />
       <path d="M14 3.8V8h4.2" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
       <path d="M9 11h6M9 14.5h6M9 18h4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
     </svg>
+  );
+}
+
+function ChartIcon({ className }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
+      <path d="M3 3v18h18" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <path d="M7 17V13M11 17V9M15 17V11M19 17V7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function ShieldIcon({ className }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
+      <path d="M12 3l8 4v5c0 5-3.5 8.25-8 10-4.5-1.75-8-5-8-10V7l8-4Z" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M9 12l2 2 4-4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ANALYTICS VIEW — Confusion Matrix + ML Metrics (from battles table)
+// ══════════════════════════════════════════════════════════════════════════════
+function AnalyticsView({ metrics, isLoading, predictions, onRefresh }) {
+  useEffect(() => { onRefresh(); }, []);
+
+  const resolved = predictions.filter(b => b.actualWinner);
+  const tp = metrics?.tp ?? 0;
+  const fp = metrics?.fp ?? 0;
+  const fn = metrics?.fn ?? 0;
+  const tn = metrics?.tn ?? 0;
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="font-display text-2xl font-bold text-slate-100">📊 Analytics Dashboard</h2>
+          <p className="mt-1 font-mono text-xs uppercase tracking-[0.32em] text-slate-500">
+            Live ML metrics from Supabase battles table
+          </p>
+        </div>
+        <button
+          onClick={onRefresh}
+          disabled={isLoading}
+          className="rounded-2xl border border-arena-400/40 bg-arena-400/10 px-4 py-2 font-mono text-xs font-bold uppercase tracking-[0.2em] text-arena-400 transition hover:bg-arena-400/20"
+        >
+          {isLoading ? 'Loading...' : '↻ Refresh'}
+        </button>
+      </div>
+
+      {/* ML Metric Cards */}
+      <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+        <MetricCard label="Accuracy" value={metrics ? `${metrics.accuracy_pct}%` : '—'} accent />
+        <MetricCard label="Precision" value={metrics ? `${metrics.precision_pct ?? '—'}%` : '—'} />
+        <MetricCard label="Recall" value={metrics ? `${metrics.recall_pct ?? '—'}%` : '—'} />
+        <MetricCard label="F1-Score" value={metrics ? `${metrics.f1_pct ?? '—'}%` : '—'} />
+        <MetricCard label="Brier Score" value={metrics ? `${metrics.brier_score ?? '—'}` : '—'} />
+      </section>
+
+      {/* Confusion Matrix */}
+      <section className="glass-panel rounded-[28px] p-5 shadow-soft md:p-6">
+        <h3 className="mb-4 font-display text-lg font-bold uppercase tracking-[0.15em] text-slate-100">
+          Confusion Matrix
+        </h3>
+        <div className="mx-auto max-w-md">
+          <div className="mb-2 text-center font-mono text-xs uppercase tracking-[0.3em] text-slate-400">Predicted</div>
+          <div className="grid grid-cols-[auto_1fr_1fr] gap-1">
+            <div />
+            <div className="text-center font-mono text-xs uppercase tracking-[0.2em] text-arena-400 py-2">Positive</div>
+            <div className="text-center font-mono text-xs uppercase tracking-[0.2em] text-arena-400 py-2">Negative</div>
+
+            <div className="flex items-center pr-3 font-mono text-xs uppercase tracking-[0.2em] text-emerald-400" style={{writingMode:'vertical-lr',transform:'rotate(180deg)'}}>Actual</div>
+            <div className="rounded-tl-2xl border border-emerald-400/30 bg-emerald-400/10 p-4 text-center">
+              <div className="font-mono text-xs uppercase tracking-[0.25em] text-emerald-400">TP</div>
+              <div className="mt-1 font-display text-3xl font-bold text-emerald-300">{tp}</div>
+            </div>
+            <div className="rounded-tr-2xl border border-red-400/30 bg-red-400/10 p-4 text-center">
+              <div className="font-mono text-xs uppercase tracking-[0.25em] text-red-400">FN</div>
+              <div className="mt-1 font-display text-3xl font-bold text-red-300">{fn}</div>
+            </div>
+
+            <div />
+            <div className="rounded-bl-2xl border border-red-400/30 bg-red-400/10 p-4 text-center">
+              <div className="font-mono text-xs uppercase tracking-[0.25em] text-red-400">FP</div>
+              <div className="mt-1 font-display text-3xl font-bold text-red-300">{fp}</div>
+            </div>
+            <div className="rounded-br-2xl border border-emerald-400/30 bg-emerald-400/10 p-4 text-center">
+              <div className="font-mono text-xs uppercase tracking-[0.25em] text-emerald-400">TN</div>
+              <div className="mt-1 font-display text-3xl font-bold text-emerald-300">{tn}</div>
+            </div>
+          </div>
+        </div>
+        <p className="mt-4 text-center font-mono text-xs text-slate-500">
+          {metrics?.total_battles ?? 0} resolved battles · {metrics?.correct ?? 0} correct predictions
+        </p>
+      </section>
+
+      {/* Confidence per Battle Bar Chart */}
+      {resolved.length > 0 ? (
+        <section className="glass-panel rounded-[28px] p-5 shadow-soft md:p-6">
+          <h3 className="mb-4 font-display text-lg font-bold uppercase tracking-[0.15em] text-slate-100">
+            Confidence per Battle
+          </h3>
+          <div className="space-y-2">
+            {resolved.slice(0, 20).map((b) => {
+              const conf = Math.round(toConfidenceValue(b.confidence, 0.5) * 100);
+              const correct = b.actualWinner === b.predictedWinner;
+              return (
+                <div key={b.id} className="flex items-center gap-3">
+                  <span className="w-16 text-right font-mono text-xs text-slate-400">#{b.id}</span>
+                  <div className="flex-1 h-5 rounded-full bg-white/10 overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all ${correct ? 'bg-emerald-400/60' : 'bg-red-400/60'}`}
+                      style={{ width: `${conf}%` }}
+                    />
+                  </div>
+                  <span className={`w-12 text-right font-mono text-xs font-bold ${correct ? 'text-emerald-400' : 'text-red-400'}`}>
+                    {conf}%
+                  </span>
+                  <span className="w-5 text-center">{correct ? '✓' : '✗'}</span>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      ) : null}
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// AUDIT LOG VIEW — Timestamped trail of all system changes
+// ══════════════════════════════════════════════════════════════════════════════
+function AuditLogView({ auditLog, isLoading, onRefresh }) {
+  useEffect(() => { onRefresh(); }, []);
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="font-display text-2xl font-bold text-slate-100">🛡️ Audit Log</h2>
+          <p className="mt-1 font-mono text-xs uppercase tracking-[0.32em] text-slate-500">
+            {auditLog.length} entries · Timestamped change trail
+          </p>
+        </div>
+        <button
+          onClick={onRefresh}
+          disabled={isLoading}
+          className="rounded-2xl border border-arena-400/40 bg-arena-400/10 px-4 py-2 font-mono text-xs font-bold uppercase tracking-[0.2em] text-arena-400 transition hover:bg-arena-400/20"
+        >
+          {isLoading ? 'Loading...' : '↻ Refresh'}
+        </button>
+      </div>
+
+      {auditLog.length === 0 ? (
+        <div className="glass-panel rounded-[24px] p-6 text-center text-slate-400">
+          {isLoading ? 'Loading audit log...' : 'No audit entries yet. Create a prediction to see the trail.'}
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {auditLog.map((entry) => {
+            const isInsert = (entry.action_done || '').includes('INSERT');
+            return (
+              <article key={entry.audit_id} className="glass-panel rounded-[20px] p-4 shadow-soft">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <span className={`flex h-8 w-8 items-center justify-center rounded-full text-sm ${
+                      isInsert ? 'bg-emerald-400/15 text-emerald-400' : 'bg-amber-400/15 text-amber-400'
+                    }`}>
+                      {isInsert ? '+' : '✎'}
+                    </span>
+                    <div>
+                      <div className="font-display text-sm font-bold text-slate-100">
+                        {entry.action_done}
+                      </div>
+                      <div className="font-mono text-xs text-slate-500">
+                        Match: {entry.affected_record || '—'} · By: {entry.user_or_operator || 'System'}
+                      </div>
+                    </div>
+                  </div>
+                  <span className="font-mono text-xs text-slate-500">
+                    {entry.timestamp ? new Date(entry.timestamp).toLocaleString() : '—'}
+                  </span>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }
 

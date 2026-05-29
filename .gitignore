@@ -4,3 +4,5 @@ dist/
 .env.local
 .env.development
 .env.production
+*.sql
+*.md
