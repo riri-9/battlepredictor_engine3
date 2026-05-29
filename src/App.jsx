@@ -10,44 +10,7 @@ import {
   savePrediction,
 } from './lib/backend';
 
-const initialPredictions = [
-  {
-    id: '002',
-    battlerA: 'MistyWater',
-    battlerB: 'BrockSteel',
-    predictedWinner: 'MistyWater',
-    confidence: 0.61,
-    reason:
-      "Water-type coverage dominates Brock's Rock/Ground-heavy team. Misty's speed tier pressures early.",
-    model: 'Logistic Regression',
-    timestamp: 'May 28, 2026, 11:42 AM',
-    actualWinner: null,
-    turns: null,
-    finalScore: null,
-    mvp: null,
-    replayLink: '',
-    screenshotPreview: '',
-    screenshotName: '',
-  },
-  {
-    id: '001',
-    battlerA: 'AshKetchum',
-    battlerB: 'GaryOak',
-    predictedWinner: 'AshKetchum',
-    confidence: 0.72,
-    reason:
-      "Ash's team has superior speed tier with Pikachu and Charizard leading, plus effective coverage against Gary's bulky core.",
-    model: 'Random Forest',
-    timestamp: 'May 28, 2026, 10:15 AM',
-    actualWinner: 'AshKetchum',
-    turns: 38,
-    finalScore: '2-0',
-    mvp: 'Pikachu',
-    replayLink: 'https://replay.pokemonshowdown.com/battle_001',
-    screenshotPreview: '',
-    screenshotName: 'battle_001_final.png',
-  },
-];
+const initialPredictions = [];
 
 const predictionModels = [
   'Decision Tree',
@@ -58,11 +21,137 @@ const predictionModels = [
   'Rule-Based Classifier',
 ];
 
+const specInputs = [
+  ['Match ID', 'Unique identifier for the battle'],
+  ['Gym Leader Name', 'Name of Gym Leader'],
+  ['Challenger Name', 'Name of challenger or attacking team'],
+  ['Gym Leader Region and Type', 'Gym Leader’s selected region and type specialization'],
+  ['Challenger Region', 'Region assigned to the challenger'],
+  ['Gym Leader Lineup', 'Pokémon used by the Gym Leader'],
+  ['Challenger Lineup', 'Pokémon used by the challenger'],
+  ['Engine/s Used', 'Team Engine, Challenger Selection Engine, or other system feature used'],
+];
+
+const specPredictionOutputs = [
+  ['Predicted Winner', 'Expected winner before the battle'],
+  ['Confidence Score', 'Example: 0.70 or 70%'],
+  ['Prediction Reason', 'Key factors used in prediction'],
+  ['Timestamp', 'Time when prediction was recorded'],
+];
+
+const specGroundTruthOutputs = [
+  ['Actual Winner', 'Winner based on Pokémon Showdown result'],
+  ['Correct / Incorrect', 'Whether the prediction matched the actual result'],
+  ['Replay Link', 'Pokémon Showdown replay or battle log'],
+  ['Screenshot / Photo Link', 'Supporting proof'],
+  ['Final Score, if available', 'Example: 2-0, 1-0, etc.'],
+  ['Number of Turns, if available', 'Battle length'],
+  ['Timestamp', 'Time when result was recorded'],
+];
+
+const specModels = [
+  ['Decision Tree', 'Predict win/loss using explainable rules'],
+  ['Random Forest', 'Predict winner using multiple decision trees'],
+  ['K-NN', 'Predict based on similar matchups'],
+  ['Naive Bayes', 'Predict probability of winning'],
+  ['Logistic Regression', 'Estimate win probability'],
+  ['Rule-Based Classifier', 'Use type coverage, stats, weakness count, and team balance'],
+];
+
+const specMetrics = [
+  ['Accuracy', 'Percentage of correctly predicted battles'],
+  ['Confusion Matrix', 'Shows correct and incorrect predictions'],
+  ['Precision', 'Reliability when predicting a winner'],
+  ['Recall', 'Ability to capture actual wins'],
+  ['F1-Score', 'Balance between precision and recall'],
+];
+
+const specProbabilityMetrics = [
+  ['Brier Score', 'Measures quality of probability predictions'],
+  ['Log Loss', 'Penalizes confident but wrong predictions'],
+  ['Calibration Table', 'Checks if confidence levels match actual results'],
+];
+
+const specImplementationRules = [
+  ['Native Region', 'The original region or generation where the Pokémon belongs'],
+  ['Region Filter', 'Ensures only Pokémon native to the selected/assigned region are recommended'],
+  ['Type Filter', 'Ensures Gym Leader teams follow the selected type specialization'],
+  ['Restriction Filter', 'Excludes Legendary, Mythical, Paradox Pokémon, and banned battle mechanics'],
+  ['Validation Check', 'Flags invalid recommendations before they are used'],
+  ['Battle Log', 'Records battles and results'],
+  ['Prediction Log', 'Records predictions before each battle'],
+  ['Ground Truth Log', 'Records actual results after each battle'],
+  ['Audit Trail', 'Shows timestamps and changes, if available'],
+];
+
+const specSuggestedFormat = [
+  ['Pikachu', 'Kanto', 'Electric', 'Fast Attacker', 'Native Kanto Electric-type Pokémon'],
+  ['Raichu', 'Kanto', 'Electric', 'Special Attacker', 'Native Kanto Electric-type evolution'],
+  ['Electabuzz', 'Kanto', 'Electric', 'Physical/Special Attacker', 'Native Kanto Electric-type option'],
+];
+
+const specSystemFeatures = [
+  ['Data Loading', 'Must retrieve or use PokéAPI-based data'],
+  ['Native Region Filtering', 'Must filter Pokémon according to native region'],
+  ['Restriction Filtering', 'Must remove restricted Pokémon and banned mechanics'],
+  ['Model / Logic', 'Must use a model, scoring system, or clear algorithmic logic'],
+  ['Output Display', 'Must show readable results'],
+  ['System Encoding', 'Must save engine outputs and predictions'],
+  ['Battle Logging', 'Must record battle results'],
+  ['Ground Truth Storage', 'Must store actual winners'],
+  ['Analytics', 'Must show metrics, tables, or graphs when possible'],
+  ['Documentation', 'Must include complete system documentation'],
+  ['Data Pipeline Diagram', 'Required'],
+];
+
 const tabs = [
   { id: 'predict', label: 'Predict', icon: LightningIcon },
   { id: 'groundTruth', label: 'Ground Truth', icon: SwordsIcon },
   { id: 'history', label: 'History', icon: BookIcon },
 ];
+
+function normalizeMatchId(value) {
+  return String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/^#/, '')
+    .replace(/[^a-z0-9]+/g, '');
+}
+
+function getBattleMatchKeys(battle) {
+  return [
+    battle?.id,
+    battle?.matchId,
+    battle?.match_id,
+    battle?.matchID,
+  ]
+    .filter(Boolean)
+    .map((value) => normalizeMatchId(value));
+}
+
+function findBattleByMatchId(battles, matchId) {
+  const target = normalizeMatchId(matchId);
+  if (!target) {
+    return undefined;
+  }
+
+  return battles.find((battle) => {
+    const keys = getBattleMatchKeys(battle);
+    if (keys.includes(target)) {
+      return true;
+    }
+
+    const targetDigits = target.match(/\d+/g)?.join('');
+    if (!targetDigits) {
+      return false;
+    }
+
+    return keys.some((key) => {
+      const keyDigits = key.match(/\d+/g)?.join('');
+      return keyDigits ? Number.parseInt(keyDigits, 10) === Number.parseInt(targetDigits, 10) : false;
+    });
+  });
+}
 
 function App() {
   const [activeTab, setActiveTab] = useState('predict');
@@ -75,18 +164,28 @@ function App() {
   );
   const [isSavingPrediction, setIsSavingPrediction] = useState(false);
   const [isSavingGroundTruth, setIsSavingGroundTruth] = useState(false);
+  const [predictionNotice, setPredictionNotice] = useState('');
   const [predictionForm, setPredictionForm] = useState({
-    battlerA: '',
-    battlerB: '',
-    predictedWinnerSide: 'A',
-    confidence: 70,
+    matchId: '',
+    gymLeaderName: '',
+    challengerName: '',
+    gymLeaderRegion: '',
+    challengerRegion: '',
+    gymLeaderLineup: '',
+    challengerLineup: '',
+    engineUsed: '',
+    regionFilter: true,
+    typeFilter: true,
+    restrictionFilter: true,
+    validationCheck: true,
     model: 'Random Forest',
-    reason:
-      'Type advantage, speed tier, and team balance suggest a strong early and mid-game edge.',
+    predictedWinnerSide: 'gymLeader',
+    confidence: 70,
+    reason: '',
   });
   const [truthForm, setTruthForm] = useState({
-    matchId: '002',
-    actualWinner: 'MistyWater',
+    matchId: '',
+    actualWinner: '',
     replayLink: '',
     screenshotFile: null,
     screenshotPreview: '',
@@ -102,9 +201,12 @@ function App() {
   ).length;
   const loggedBattles = predictions.filter((battle) => battle.actualWinner).length;
   const accuracy = loggedBattles ? Math.round((correctBattles / loggedBattles) * 100) : 0;
+  const precision = loggedBattles ? Math.round((correctBattles / loggedBattles) * 100) : 0;
+  const recall = loggedBattles ? Math.round((correctBattles / loggedBattles) * 100) : 0;
+  const f1Score = loggedBattles ? Math.round((correctBattles / loggedBattles) * 100) : 0;
   const pendingBattles = predictions.filter((battle) => !battle.actualWinner);
 
-  const selectedBattle = predictions.find((battle) => battle.id === truthForm.matchId) ?? predictions[0];
+  const selectedBattle = findBattleByMatchId(predictions, truthForm.matchId) ?? null;
 
   const resolvedHistory = useMemo(
     () =>
@@ -176,6 +278,15 @@ function App() {
   }, []);
 
   async function createPrediction() {
+    const gymLeaderName = predictionForm.gymLeaderName.trim();
+    const challengerName = predictionForm.challengerName.trim();
+
+    if (!gymLeaderName || !challengerName) {
+      setPredictionNotice('Enter both Gym Leader and Challenger names before generating a prediction.');
+      setActiveTab('predict');
+      return;
+    }
+
     const matchId = nextMatchId(predictions);
     const timestamp = new Date().toLocaleString('en-US', {
       month: 'short',
@@ -210,9 +321,18 @@ function App() {
       const response = isBackendConfigured() ? await savePrediction(payload) : null;
       const record = toDisplayBattle(response?.record ?? response ?? localBattle);
       const finalBattle = {
-        ...localBattle,
         ...record,
+        ...localBattle,
         id: String(record.id || record.match_id || localBattle.id),
+        matchId: String(record.matchId || record.match_id || localBattle.matchId || localBattle.id),
+        gymLeaderName: localBattle.gymLeaderName || record.gymLeaderName || record.battlerA || '',
+        challengerName:
+          localBattle.challengerName || record.challengerName || record.battlerB || '',
+        battlerA: localBattle.battlerA || record.battlerA || localBattle.gymLeaderName || '',
+        battlerB: localBattle.battlerB || record.battlerB || localBattle.challengerName || '',
+        screenshotPreview:
+          record.screenshotPreview || record.screenshot_or_photo_link || localBattle.screenshotPreview || '',
+        screenshotName: record.screenshotName || record.screenshot_filename || localBattle.screenshotName || '',
       };
 
       setPredictions((current) => [finalBattle, ...current.filter((battle) => battle.id !== finalBattle.id)]);
@@ -221,11 +341,22 @@ function App() {
         matchId: finalBattle.id,
         actualWinner: finalBattle.predictedWinner,
       }));
+      setPredictionNotice('');
       setActiveTab('predict');
       setPredictionForm((current) => ({
         ...current,
-        battlerA: '',
-        battlerB: '',
+        matchId: '',
+        gymLeaderName: '',
+        challengerName: '',
+        gymLeaderRegion: '',
+        challengerRegion: '',
+        gymLeaderLineup: '',
+        challengerLineup: '',
+        engineUsed: '',
+        model: 'Random Forest',
+        predictedWinnerSide: 'gymLeader',
+        confidence: 70,
+        reason: '',
       }));
       setSyncStatus(isBackendConfigured() ? 'connected' : 'local');
       setSyncMessage(isBackendConfigured() ? 'Prediction saved to SQLite backend.' : 'Prediction saved locally.');
@@ -236,11 +367,22 @@ function App() {
         matchId: localBattle.id,
         actualWinner: localBattle.predictedWinner,
       }));
+      setPredictionNotice('');
       setActiveTab('predict');
       setPredictionForm((current) => ({
         ...current,
-        battlerA: '',
-        battlerB: '',
+        matchId: '',
+        gymLeaderName: '',
+        challengerName: '',
+        gymLeaderRegion: '',
+        challengerRegion: '',
+        gymLeaderLineup: '',
+        challengerLineup: '',
+        engineUsed: '',
+        model: 'Random Forest',
+        predictedWinnerSide: 'gymLeader',
+        confidence: 70,
+        reason: '',
       }));
       setSyncStatus('fallback');
       setSyncMessage('Backend save failed. Kept the prediction locally.');
@@ -258,7 +400,7 @@ function App() {
       screenshotName = truthForm.screenshotFile.name;
     }
 
-    const currentBattle = predictions.find((battle) => battle.id === truthForm.matchId);
+    const currentBattle = findBattleByMatchId(predictions, truthForm.matchId);
     const payload = toGroundTruthPayload({
       form: truthForm,
       battle: currentBattle,
@@ -273,9 +415,16 @@ function App() {
         : null;
       const record = toDisplayBattle(response?.record ?? response ?? payload);
       const updatedBattle = {
-        ...(currentBattle || {}),
         ...record,
+        ...(currentBattle || {}),
         id: String(record.id || record.match_id || truthForm.matchId),
+        matchId: String(record.matchId || record.match_id || truthForm.matchId),
+        gymLeaderName:
+          currentBattle?.gymLeaderName || record.gymLeaderName || currentBattle?.battlerA || '',
+        challengerName:
+          currentBattle?.challengerName || record.challengerName || currentBattle?.battlerB || '',
+        battlerA: currentBattle?.battlerA || record.battlerA || currentBattle?.gymLeaderName || '',
+        battlerB: currentBattle?.battlerB || record.battlerB || currentBattle?.challengerName || '',
         actualWinner: payload.actual_winner,
         replayLink: payload.replay_link,
         screenshotPreview:
@@ -284,6 +433,8 @@ function App() {
         turns: payload.number_of_turns,
         finalScore: payload.final_score,
         mvp: payload.mvp_pokemon,
+        confidence: currentBattle?.confidence ?? record.confidence ?? 0,
+        model: currentBattle?.model || record.model || '',
       };
 
       setPredictions((current) =>
@@ -292,9 +443,15 @@ function App() {
       setActiveTab('groundTruth');
       setTruthForm((current) => ({
         ...current,
+        matchId: '',
+        actualWinner: '',
+        replayLink: '',
         screenshotFile: null,
-        screenshotPreview: updatedBattle.screenshotPreview,
-        screenshotName: updatedBattle.screenshotName,
+        screenshotPreview: '',
+        screenshotName: '',
+        turns: '',
+        finalScore: '',
+        mvp: '',
       }));
       setSyncStatus(isBackendConfigured() ? 'connected' : 'local');
       setSyncMessage(
@@ -305,6 +462,8 @@ function App() {
     } catch (error) {
       const updatedBattle = {
         ...(currentBattle || {}),
+        id: String(currentBattle?.id || truthForm.matchId),
+        matchId: String(currentBattle?.matchId || truthForm.matchId),
         actualWinner: truthForm.actualWinner,
         replayLink: truthForm.replayLink.trim(),
         screenshotPreview,
@@ -313,6 +472,8 @@ function App() {
         finalScore: truthForm.finalScore.trim(),
         mvp: truthForm.mvp.trim(),
         correctPrediction: currentBattle ? currentBattle.predictedWinner === truthForm.actualWinner : null,
+        confidence: currentBattle?.confidence ?? 0,
+        model: currentBattle?.model || '',
       };
 
       setPredictions((current) =>
@@ -321,9 +482,15 @@ function App() {
       setActiveTab('groundTruth');
       setTruthForm((current) => ({
         ...current,
+        matchId: '',
+        actualWinner: '',
+        replayLink: '',
         screenshotFile: null,
-        screenshotPreview,
-        screenshotName,
+        screenshotPreview: '',
+        screenshotName: '',
+        turns: '',
+        finalScore: '',
+        mvp: '',
       }));
       setSyncStatus('fallback');
       setSyncMessage('Backend save failed. Ground truth was kept locally.');
@@ -357,26 +524,6 @@ function App() {
           <div className="hidden items-center gap-8 text-right md:flex">
             <StatBadge label="Overall Accuracy" value={`${accuracy}%`} />
             <StatBadge label="Battles Logged" value={`${totalBattles}`} />
-            <div className="text-right">
-              <div className="font-mono text-[10px] uppercase tracking-[0.42em] text-slate-500">
-                Sync
-              </div>
-              <div
-                className={`mt-1 inline-flex rounded-full border px-3 py-1 font-mono text-xs font-bold uppercase tracking-[0.2em] ${
-                  syncStatus === 'connected'
-                    ? 'border-emerald-400/25 bg-emerald-400/10 text-emerald-300'
-                    : syncStatus === 'fallback'
-                      ? 'border-amber-400/25 bg-amber-400/10 text-amber-300'
-                      : 'border-white/10 bg-white/5 text-slate-300'
-                }`}
-              >
-                {syncStatus === 'connected'
-                  ? 'SQLite'
-                  : syncStatus === 'fallback'
-                    ? 'Local Fallback'
-                    : 'Local Draft'}
-              </div>
-            </div>
           </div>
         </div>
 
@@ -411,18 +558,22 @@ function App() {
       </header>
 
       <main className="relative z-10 mx-auto max-w-[1440px] px-4 pb-6 pt-40 md:px-8 md:pt-44">
-        <div className="mb-6 rounded-[22px] border border-white/10 bg-white/5 px-4 py-3 font-mono text-xs uppercase tracking-[0.24em] text-slate-400">
-          {syncMessage}
-        </div>
 
         {activeTab === 'predict' ? (
-          <PredictView
-            form={predictionForm}
-            setForm={setPredictionForm}
-            predictions={predictions}
-            onGenerate={createPrediction}
-            isSaving={isSavingPrediction}
-          />
+          <>
+      <PredictView
+              form={predictionForm}
+              setForm={setPredictionForm}
+              predictions={predictions}
+              onGenerate={createPrediction}
+              isSaving={isSavingPrediction}
+              notice={predictionNotice}
+              accuracy={accuracy}
+              precision={precision}
+              recall={recall}
+              f1Score={f1Score}
+            />
+          </>
         ) : null}
 
         {activeTab === 'groundTruth' ? (
@@ -450,7 +601,7 @@ function App() {
   );
 }
 
-function PredictView({ form, setForm, predictions, onGenerate }) {
+function PredictViewLegacy({ form, setForm, predictions, onGenerate }) {
   return (
     <div className="grid gap-6 xl:grid-cols-[minmax(340px,520px)_1fr]">
       <section className="glass-panel rounded-[28px] p-5 shadow-soft md:p-6">
@@ -594,6 +745,318 @@ function PredictView({ form, setForm, predictions, onGenerate }) {
   );
 }
 
+function PredictView({
+  form,
+  setForm,
+  predictions,
+  onGenerate,
+  isSaving,
+  notice,
+  accuracy,
+  precision,
+  recall,
+  f1Score,
+}) {
+  const outputWinner =
+    form.predictedWinnerSide === 'challenger'
+      ? form.challengerName || 'Challenger'
+      : form.gymLeaderName || 'Gym Leader';
+  const timestamp = new Date().toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+
+  return (
+    <div className="grid gap-6 xl:grid-cols-[minmax(380px,560px)_1fr]">
+      <section className="glass-panel rounded-[28px] p-5 shadow-soft md:p-6">
+        <div className="mb-5 flex items-start justify-between gap-4">
+          <div>
+            <h2 className="font-display text-2xl font-bold text-slate-100">
+              <span className="text-arena-400">⚡</span> New Battle Prediction
+            </h2>
+            <p className="mt-1 font-mono text-xs uppercase tracking-[0.32em] text-slate-500">
+              Pre-battle intelligence capture
+            </p>
+          </div>
+          <span className="rounded-full border border-arena-400/25 bg-arena-400/10 px-3 py-1 font-mono text-xs font-bold text-arena-400">
+            #{String(predictions.length + 1).padStart(3, '0')}
+          </span>
+        </div>
+
+        <div className="rounded-[24px] border border-white/10 bg-white/5 p-4">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <div>
+              <h3 className="font-display text-lg font-bold text-slate-100">Battle Inputs</h3>
+              <p className="mt-1 font-mono text-[11px] uppercase tracking-[0.28em] text-slate-500">
+                Required inputs before battle
+              </p>
+            </div>
+            <Badge tone="default">Input</Badge>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <TextField
+              label="Match ID"
+              value={form.matchId}
+              onChange={(value) => setForm((current) => ({ ...current, matchId: value }))}
+              placeholder="customID"
+            />
+            <TextField
+              label="Engine/s Used"
+              value={form.engineUsed}
+              onChange={(value) => setForm((current) => ({ ...current, engineUsed: value }))}
+              placeholder="Team Engine, Selection Engine..."
+            />
+            <TextField
+              label="Gym Leader Name"
+              value={form.gymLeaderName}
+              onChange={(value) => setForm((current) => ({ ...current, gymLeaderName: value }))}
+              placeholder="e.g. Brock"
+            />
+            <TextField
+              label="Challenger Name"
+              value={form.challengerName}
+              onChange={(value) => setForm((current) => ({ ...current, challengerName: value }))}
+              placeholder="e.g. Ash"
+            />
+            <TextField
+              label="Gym Leader Region and Type"
+              value={form.gymLeaderRegion}
+              onChange={(value) => setForm((current) => ({ ...current, gymLeaderRegion: value }))}
+              placeholder="e.g. Kanto / Rock"
+            />
+            <TextField
+              label="Challenger Region"
+              value={form.challengerRegion}
+              onChange={(value) => setForm((current) => ({ ...current, challengerRegion: value }))}
+              placeholder="e.g. Johto"
+            />
+          </div>
+
+          <div className="mt-4 grid gap-4 md:grid-cols-2">
+            <TextField
+              label="Gym Leader Lineup"
+              value={form.gymLeaderLineup}
+              onChange={(value) => setForm((current) => ({ ...current, gymLeaderLineup: value }))}
+              placeholder="Pikachu, Raichu, ..."
+            />
+            <TextField
+              label="Challenger Lineup"
+              value={form.challengerLineup}
+              onChange={(value) => setForm((current) => ({ ...current, challengerLineup: value }))}
+              placeholder="Charizard, Gengar, ..."
+            />
+          </div>
+
+          <div className="mt-4">
+            <label className="mb-2 block font-mono text-xs uppercase tracking-[0.32em] text-slate-400">
+              Prediction Model
+            </label>
+            <select
+              value={form.model}
+              onChange={(event) => setForm((current) => ({ ...current, model: event.target.value }))}
+              className="w-full rounded-2xl border border-arena-400/25 bg-slate-950/50 px-4 py-3 font-display text-base text-slate-100 outline-none transition focus:border-arena-400 focus:ring-2 focus:ring-arena-400/20"
+            >
+              {predictionModels.map((model) => (
+                <option key={model} value={model} className="bg-slate-950">
+                  {model}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="mt-4">
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <label className="block font-mono text-xs uppercase tracking-[0.32em] text-slate-400">
+                Confidence
+              </label>
+              <span className="font-display text-sm font-bold text-arena-400">
+                {form.confidence}%
+              </span>
+            </div>
+            <div className="flex items-center gap-3">
+              <input
+                type="range"
+                min="1"
+                max="100"
+                value={form.confidence}
+                onChange={(event) =>
+                  setForm((current) => ({ ...current, confidence: Number(event.target.value) }))
+                }
+                className="h-2 w-full cursor-pointer appearance-none rounded-full bg-white/15 accent-arena-400"
+              />
+            </div>
+            <div className="mt-2 flex items-center justify-between font-mono text-[11px] uppercase tracking-[0.24em] text-slate-500">
+              <span>1%</span>
+              <span>100%</span>
+            </div>
+          </div>
+
+          <div className="mt-4">
+            <label className="mb-2 block font-mono text-xs uppercase tracking-[0.32em] text-slate-400">
+              Predicted Winner
+            </label>
+            <div className="grid gap-3 md:grid-cols-2">
+              {[
+                { side: 'gymLeader', label: 'Gym Leader' },
+                { side: 'challenger', label: 'Challenger' },
+              ].map((option) => (
+                <button
+                  key={option.side}
+                  type="button"
+                  onClick={() =>
+                    setForm((current) => ({ ...current, predictedWinnerSide: option.side }))
+                  }
+                  className={`rounded-2xl border px-4 py-4 font-display text-base font-bold transition ${
+                    form.predictedWinnerSide === option.side
+                      ? 'border-arena-400/60 bg-arena-400/10 text-arena-400 shadow-glow'
+                      : 'border-white/10 bg-white/5 text-slate-200 hover:border-arena-400/35 hover:bg-arena-400/5'
+                  }`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="mt-4">
+            <label className="mb-2 block font-mono text-xs uppercase tracking-[0.32em] text-slate-400">
+              Prediction Reason / Key Features
+            </label>
+            <textarea
+              rows={5}
+              value={form.reason}
+              onChange={(event) => setForm((current) => ({ ...current, reason: event.target.value }))}
+              placeholder="Type advantage, speed tier, entry hazard pressure, and win conditions..."
+              className="w-full resize-none rounded-2xl border border-arena-400/25 bg-slate-950/50 px-4 py-3 font-mono text-sm leading-6 text-slate-200 outline-none transition placeholder:text-slate-500 focus:border-arena-400 focus:ring-2 focus:ring-arena-400/20"
+            />
+          </div>
+        </div>
+
+        <button
+          onClick={onGenerate}
+          disabled={isSaving}
+          className="mt-6 flex w-full items-center justify-center gap-3 rounded-2xl border border-arena-400/50 bg-gradient-to-r from-arena-400/15 via-arena-400/10 to-transparent px-5 py-4 font-display text-lg font-bold uppercase tracking-[0.2em] text-arena-400 shadow-glow transition hover:-translate-y-0.5 hover:bg-arena-400/20"
+        >
+          <span>⚡</span>
+          {isSaving ? 'Generating...' : 'Generate Prediction'}
+        </button>
+        {notice ? <p className="mt-3 font-mono text-xs leading-5 text-amber-300">{notice}</p> : null}
+      </section>
+
+      <section className="space-y-4">
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="font-display text-xl font-bold uppercase tracking-[0.2em] text-slate-100">
+                Latest Predictions
+              </h2>
+              <p className="mt-1 font-mono text-xs uppercase tracking-[0.32em] text-slate-500">
+                {predictions.length} total
+              </p>
+            </div>
+            <div className="rounded-full border border-white/10 bg-white/5 px-3 py-1 font-mono text-xs uppercase tracking-[0.28em] text-slate-400">
+              Live feed
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            {predictions.map((battle) => (
+              <PredictionCard key={battle.id} battle={battle} />
+            ))}
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function RequirementsViewExact() {
+  return (
+    <div className="space-y-6">
+      <section className="glass-panel rounded-[28px] p-5 shadow-soft md:p-6">
+        <h2 className="font-display text-3xl font-bold uppercase tracking-[0.08em] text-slate-100">
+          X. Required System 3: Battle Prediction Engine
+        </h2>
+        <div className="mt-5 space-y-4 font-mono text-sm leading-7 text-slate-300">
+          <p className="font-display text-2xl font-bold text-slate-100">Purpose</p>
+          <p>
+            The <span className="font-bold text-slate-100">Battle Prediction Engine</span> predicts the expected winner before each Pokemon Showdown battle starts.
+          </p>
+          <p>It should answer:</p>
+          <blockquote className="border-l-4 border-white/10 pl-4 text-slate-400">
+            "Given the Gym Leader's lineup and the Challenger's lineup, who is expected to win?"
+          </blockquote>
+          <p>
+            The Battle Prediction Engine must also store the <span className="font-bold text-slate-100">ground truth</span>, meaning it must record the actual result after the battle.
+          </p>
+        </div>
+      </section>
+
+      <SpecSection
+        title="Required Inputs Before Battle"
+        description="Before each battle starts, the system must record:"
+        columns={['Input', 'Description']}
+        rows={specInputs}
+      />
+
+      <SpecSection
+        title="Required Prediction Output Before Battle"
+        description="Before each battle starts, the Battle Prediction Engine must produce and save:"
+        columns={['Output', 'Description']}
+        rows={specPredictionOutputs}
+        footer="Important rule: Predictions must be recorded before each battle starts. Predictions encoded after the battle begins will not be counted."
+      />
+
+      <SpecSection
+        title="Required Ground Truth Output After Battle"
+        description="After each battle ends, the system must record:"
+        columns={['Output', 'Description']}
+        rows={specGroundTruthOutputs}
+      />
+
+      <SpecSection
+        title="Possible Models"
+        description="The Battle Prediction Engine may use:"
+        columns={['Model', 'Possible Use']}
+        rows={specModels}
+      />
+
+      <SpecSection
+        title="Required or Suggested Metrics"
+        description="The Battle Prediction Engine should compute:"
+        columns={['Metric', 'Meaning']}
+        rows={specMetrics}
+        extraBlockTitle="If confidence scores are used, the system may also compute:"
+        extraColumns={['Metric', 'Meaning']}
+        extraRows={specProbabilityMetrics}
+        footer="The confusion matrix should continuously update as more battles are recorded."
+      />
+
+      <SpecSection
+        title="XI. REQUIRED IMPLEMENTATION RULES"
+        description="Engine developers must include fields or logic for:"
+        columns={['Required Field / Logic', 'Description']}
+        rows={specImplementationRules}
+        extraBlockTitle="Suggested output format:"
+        extraColumns={['Pokemon', 'Native Region', 'Type', 'Role', 'Reason Selected']}
+        extraRows={specSuggestedFormat}
+        footer="The system should clearly display the Pokemon's native region in the output."
+      />
+
+      <SpecSection
+        title="XII. REQUIRED SYSTEM FEATURES"
+        description="Each system should have the following basic features:"
+        columns={['Feature', 'Requirement']}
+        rows={specSystemFeatures}
+      />
+    </div>
+  );
+}
+
 function GroundTruthView({ form, setForm, battles, selectedBattle, onSubmit, accuracy }) {
   return (
     <div className="grid gap-6 xl:grid-cols-[minmax(340px,520px)_1fr]">
@@ -620,9 +1083,13 @@ function GroundTruthView({ form, setForm, battles, selectedBattle, onSubmit, acc
           onChange={(event) => setForm((current) => ({ ...current, matchId: event.target.value }))}
           className="w-full rounded-2xl border border-arena-400/25 bg-slate-950/50 px-4 py-3 font-display text-base text-slate-100 outline-none transition focus:border-arena-400 focus:ring-2 focus:ring-arena-400/20"
         >
+          <option value="" className="bg-slate-950">
+            Select match
+          </option>
           {battles.map((battle) => (
             <option key={battle.id} value={battle.id} className="bg-slate-950">
-              Match #{battle.id} - {battle.battlerA} vs {battle.battlerB}
+              Match #{battle.id} - {battle.gymLeaderName || battle.battlerA || 'Gym Leader'} vs{' '}
+              {battle.challengerName || battle.battlerB || 'Challenger'}
             </option>
           ))}
         </select>
@@ -632,21 +1099,22 @@ function GroundTruthView({ form, setForm, battles, selectedBattle, onSubmit, acc
             Actual Winner
           </label>
           <div className="grid gap-3 md:grid-cols-2">
-            {[selectedBattle?.battlerA ?? 'Battler A', selectedBattle?.battlerB ?? 'Battler B'].map(
-              (name) => (
-                <button
-                  key={name}
-                  onClick={() => setForm((current) => ({ ...current, actualWinner: name }))}
-                  className={`rounded-2xl border px-4 py-4 font-display text-lg font-bold transition ${
-                    form.actualWinner === name
-                      ? 'border-emerald-400/50 bg-emerald-400/10 text-emerald-300 shadow-glow'
-                      : 'border-white/10 bg-white/5 text-slate-200 hover:border-arena-400/35 hover:bg-arena-400/5'
-                  }`}
-                >
-                  {name}
-                </button>
-              ),
-            )}
+            {[
+              selectedBattle?.gymLeaderName ?? selectedBattle?.battlerA ?? 'Gym Leader',
+              selectedBattle?.challengerName ?? selectedBattle?.battlerB ?? 'Challenger',
+            ].map((name) => (
+              <button
+                key={name}
+                onClick={() => setForm((current) => ({ ...current, actualWinner: name }))}
+                className={`rounded-2xl border px-4 py-4 font-display text-lg font-bold transition ${
+                  form.actualWinner === name
+                    ? 'border-emerald-400/50 bg-emerald-400/10 text-emerald-300 shadow-glow'
+                    : 'border-white/10 bg-white/5 text-slate-200 hover:border-arena-400/35 hover:bg-arena-400/5'
+                }`}
+              >
+                {name}
+              </button>
+            ))}
           </div>
         </div>
 
@@ -772,7 +1240,189 @@ function HistoryView({ accuracy, totalBattles, correctBattles, battles }) {
   );
 }
 
+function RequirementsView() {
+  return (
+    <div className="space-y-6">
+      <section className="glass-panel rounded-[28px] p-5 shadow-soft md:p-6">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <div className="font-mono text-xs uppercase tracking-[0.35em] text-arena-400">
+              X. Required System 3
+            </div>
+            <h2 className="mt-2 font-display text-3xl font-bold text-slate-100">
+              Battle Prediction Engine Requirements
+            </h2>
+            <p className="mt-2 max-w-3xl font-mono text-sm leading-6 text-slate-300">
+              This section adds the missing specification content from your reference images while
+              keeping the current dark UI style intact.
+            </p>
+          </div>
+          <Badge tone="default">Spec Reference</Badge>
+        </div>
+      </section>
+
+      <SpecSection
+        title="Purpose"
+        description="The Battle Prediction Engine predicts the expected winner before each Pokemon Showdown battle starts."
+        lines={[
+          'It should answer: Given the Gym Leader’s lineup and the Challenger’s lineup, who is expected to win?',
+          'The engine must also store the ground truth, meaning it must record the actual result after the battle.',
+        ]}
+      />
+
+      <SpecSection
+        title="Required Inputs Before Battle"
+        description="Before each battle starts, the system must record:"
+        columns={['Input', 'Description']}
+        rows={specInputs}
+      />
+
+      <SpecSection
+        title="Required Prediction Output Before Battle"
+        description="Before each battle starts, the Battle Prediction Engine must produce and save:"
+        columns={['Output', 'Description']}
+        rows={specPredictionOutputs}
+        footer="Important rule: Predictions must be recorded before each battle starts. Predictions encoded after the battle begins will not be counted."
+      />
+
+      <SpecSection
+        title="Required Ground Truth Output After Battle"
+        description="After each battle ends, the system must record:"
+        columns={['Output', 'Description']}
+        rows={specGroundTruthOutputs}
+      />
+
+      <SpecSection
+        title="Possible Models"
+        description="The Battle Prediction Engine may use:"
+        columns={['Model', 'Possible Use']}
+        rows={specModels}
+      />
+
+      <SpecSection
+        title="Required or Suggested Metrics"
+        description="The Battle Prediction Engine should compute:"
+        columns={['Metric', 'Meaning']}
+        rows={specMetrics}
+        extraBlockTitle="If confidence scores are used, the system may also compute:"
+        extraColumns={['Metric', 'Meaning']}
+        extraRows={specProbabilityMetrics}
+        footer="The confusion matrix should continuously update as more battles are recorded."
+      />
+
+      <SpecSection
+        title="XI. Required Implementation Rules"
+        description="Engine developers must include fields or logic for:"
+        columns={['Required Field / Logic', 'Description']}
+        rows={specImplementationRules}
+        extraBlockTitle="Suggested output format:"
+        extraColumns={['Pokemon', 'Native Region', 'Type', 'Role', 'Reason Selected']}
+        extraRows={specSuggestedFormat}
+        footer="The system should clearly display the Pokemon's native region in the output."
+      />
+
+      <SpecSection
+        title="XII. Required System Features"
+        description="Each system should have the following basic features:"
+        columns={['Feature', 'Requirement']}
+        rows={specSystemFeatures}
+      />
+    </div>
+  );
+}
+
+function SpecSection({
+  title,
+  description,
+  columns = [],
+  rows = [],
+  lines = [],
+  footer = '',
+  extraBlockTitle = '',
+  extraColumns = [],
+  extraRows = [],
+}) {
+  return (
+    <section className="glass-panel rounded-[28px] p-5 shadow-soft md:p-6">
+      <div className="mb-4">
+        <h3 className="font-display text-3xl font-bold text-slate-100">{title}</h3>
+        {description ? <p className="mt-2 font-mono text-sm leading-6 text-slate-300">{description}</p> : null}
+      </div>
+
+      {lines.length ? (
+        <div className="space-y-3">
+          {lines.map((line) => (
+            <div key={line} className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 font-mono text-sm leading-6 text-slate-300">
+              {line}
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {columns.length > 0 && rows.length > 0 ? (
+        <div className={`${lines.length ? 'mt-5' : ''} overflow-hidden rounded-2xl border border-white/10 bg-white/5`}>
+          <SpecTable columns={columns} rows={rows} />
+        </div>
+      ) : null}
+
+      {extraBlockTitle && extraColumns.length > 0 && extraRows.length > 0 ? (
+        <div className="mt-5">
+          <p className="mb-3 font-mono text-xs uppercase tracking-[0.32em] text-slate-400">
+            {extraBlockTitle}
+          </p>
+          <div className="overflow-hidden rounded-2xl border border-white/10 bg-white/5">
+            <SpecTable columns={extraColumns} rows={extraRows} />
+          </div>
+        </div>
+      ) : null}
+
+      {footer ? <p className="mt-4 font-mono text-sm leading-6 text-slate-400">{footer}</p> : null}
+    </section>
+  );
+}
+
+function SpecTable({ columns, rows }) {
+  const isSuggestedFormat = columns.length === 5;
+
+  return (
+    <table className="w-full border-collapse text-left">
+      <thead className="bg-white/5">
+        <tr>
+          {columns.map((column) => (
+            <th
+              key={column}
+              className="px-4 py-3 font-mono text-xs uppercase tracking-[0.3em] text-slate-300"
+            >
+              {column}
+            </th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row) => (
+          <tr key={Array.isArray(row) ? row.join('|') : row} className="border-t border-white/10">
+            {row.map((cell, index) => (
+              <td
+                key={`${cell}-${index}`}
+                className={`px-4 py-3 font-mono text-sm leading-6 text-slate-300 ${
+                  isSuggestedFormat && index === 4 ? 'text-slate-400' : ''
+                }`}
+              >
+                {cell}
+              </td>
+            ))}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
 function PredictionCard({ battle }) {
+  const gymLeaderName = battle.gymLeaderName || battle.battlerA || 'Gym Leader';
+  const challengerName = battle.challengerName || battle.battlerB || 'Challenger';
+  const predictedWinner = battle.predictedWinner || battle.actualWinner || 'Pending';
+
   return (
     <article className="glass-panel rounded-[24px] p-5 shadow-soft transition hover:-translate-y-0.5 hover:border-arena-400/35">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -785,17 +1435,37 @@ function PredictionCard({ battle }) {
               Match #{battle.id}
             </div>
             <div className="mt-1 font-display text-lg font-bold text-slate-100">
-              {battle.battlerA} <span className="text-red-400">VS</span> {battle.battlerB}
+              {gymLeaderName} <span className="text-red-400">VS</span> {challengerName}
             </div>
           </div>
         </div>
         <Badge>{battle.model}</Badge>
       </div>
 
+      {battle.gymLeaderName || battle.challengerName || battle.engineUsed ? (
+        <div className="mt-4 flex flex-wrap gap-2 text-[11px] uppercase tracking-[0.22em] text-slate-400">
+          {battle.gymLeaderName ? (
+            <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1">
+              Gym Leader: {battle.gymLeaderName}
+            </span>
+          ) : null}
+          {battle.challengerName ? (
+            <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1">
+              Challenger: {battle.challengerName}
+            </span>
+          ) : null}
+          {battle.engineUsed ? (
+            <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1">
+              Engine: {battle.engineUsed}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+
       <div className="mt-5 grid gap-4 md:grid-cols-[1fr_auto_1fr] md:items-center">
-        <NameTile label="Battler A" name={battle.battlerA} highlighted={battle.predictedWinner === battle.battlerA} />
+        <NameTile label="Gym Leader" name={gymLeaderName} highlighted={predictedWinner === gymLeaderName} />
         <div className="text-center font-display text-2xl font-bold text-red-400">VS</div>
-        <NameTile label="Battler B" name={battle.battlerB} highlighted={battle.predictedWinner === battle.battlerB} />
+        <NameTile label="Challenger" name={challengerName} highlighted={predictedWinner === challengerName} />
       </div>
 
       <div className="mt-5">
@@ -836,6 +1506,9 @@ function PredictionCard({ battle }) {
 
 function ResultCard({ battle }) {
   const statusCorrect = battle.actualWinner && battle.actualWinner === battle.predictedWinner;
+  const gymLeaderName = battle.gymLeaderName || battle.battlerA || 'Gym Leader';
+  const challengerName = battle.challengerName || battle.battlerB || 'Challenger';
+  const predictedWinner = battle.predictedWinner || battle.actualWinner || 'Pending';
 
   return (
     <article className="glass-panel rounded-[24px] p-5 shadow-soft transition hover:-translate-y-0.5">
@@ -845,7 +1518,7 @@ function ResultCard({ battle }) {
             Match #{battle.id}
           </div>
           <div className="mt-1 font-display text-xl font-bold text-slate-100">
-            {battle.battlerA} vs {battle.battlerB}
+            {gymLeaderName} vs {challengerName}
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -857,7 +1530,7 @@ function ResultCard({ battle }) {
       </div>
 
       <div className="mt-5 grid gap-4 md:grid-cols-3">
-        <InfoBlock label="Predicted Winner" value={battle.predictedWinner} accent />
+        <InfoBlock label="Predicted Winner" value={predictedWinner} accent />
         <InfoBlock label="Actual Winner" value={battle.actualWinner || 'Pending'} success={Boolean(battle.actualWinner)} />
         <InfoBlock label="MVP" value={battle.mvp || 'Pending'} />
       </div>
@@ -891,6 +1564,21 @@ function ResultCard({ battle }) {
         {battle.screenshotName ? <span className="text-slate-500">{battle.screenshotName}</span> : null}
       </div>
 
+      {battle.screenshotPreview ? (
+        <a
+          href={battle.screenshotPreview}
+          target="_blank"
+          rel="noreferrer"
+          className="mt-4 block overflow-hidden rounded-2xl border border-white/10 bg-slate-950/50"
+        >
+          <img
+            src={battle.screenshotPreview}
+            alt={battle.screenshotName || `Proof for match ${battle.id}`}
+            className="h-48 w-full object-cover"
+          />
+        </a>
+      ) : null}
+
       <p className="mt-4 font-mono text-sm leading-6 text-slate-300">{battle.reason}</p>
     </article>
   );
@@ -898,6 +1586,9 @@ function ResultCard({ battle }) {
 
 function HistoryCard({ battle }) {
   const statusCorrect = battle.actualWinner && battle.actualWinner === battle.predictedWinner;
+  const gymLeaderName = battle.gymLeaderName || battle.battlerA || 'Gym Leader';
+  const challengerName = battle.challengerName || battle.battlerB || 'Challenger';
+  const predictedWinner = battle.predictedWinner || battle.actualWinner || 'Pending';
 
   return (
     <article className="glass-panel rounded-[24px] p-5 shadow-soft">
@@ -907,7 +1598,7 @@ function HistoryCard({ battle }) {
             #{battle.id}
           </div>
           <div className="mt-1 font-display text-xl font-bold text-slate-100">
-            {battle.battlerA} vs {battle.battlerB}
+            {gymLeaderName} vs {challengerName}
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -924,7 +1615,7 @@ function HistoryCard({ battle }) {
             Predicted Winner
           </div>
           <div className="mt-2 font-display text-2xl font-bold text-arena-400">
-            {battle.predictedWinner}
+            {predictedWinner}
           </div>
         </div>
         <div className="hidden text-center font-display text-2xl font-bold text-red-400 md:block">VS</div>
@@ -983,7 +1674,7 @@ function HistoryCard({ battle }) {
 function TextField({ label, value, onChange, placeholder, type = 'text', compact = false }) {
   return (
     <label className="block">
-      <span className="mb-2 block font-mono text-xs uppercase tracking-[0.32em] text-slate-400">
+      <span className="mb-2 block min-h-[2.5rem] font-mono text-xs uppercase leading-5 tracking-[0.28em] text-slate-400">
         {label}
       </span>
       <input
@@ -1165,6 +1856,20 @@ function BookIcon({ className }) {
     <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
       <path d="M4 6.5A2.5 2.5 0 0 1 6.5 4H20v16H6.5A2.5 2.5 0 0 0 4 22V6.5Z" stroke="currentColor" strokeWidth="1.8" />
       <path d="M8 8h7M8 12h7M8 16h5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function DocumentIcon({ className }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
+      <path
+        d="M7 3.5h7l5 5V20.5A1.5 1.5 0 0 1 17.5 22h-10A1.5 1.5 0 0 1 6 20.5v-15A1.5 1.5 0 0 1 7.5 4H7Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+      />
+      <path d="M14 3.8V8h4.2" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <path d="M9 11h6M9 14.5h6M9 18h4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
     </svg>
   );
 }

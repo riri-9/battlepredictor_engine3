@@ -91,6 +91,18 @@ export function nextMatchId(battles) {
 export function toDisplayBattle(record) {
   return {
     id: String(record.id ?? record.match_id ?? ''),
+    matchId: String(record.matchId ?? record.match_id ?? ''),
+    gymLeaderName: record.gymLeaderName ?? record.gym_leader_name ?? '',
+    challengerName: record.challengerName ?? record.challenger_name ?? '',
+    gymLeaderRegion: record.gymLeaderRegion ?? record.gym_leader_region ?? '',
+    challengerRegion: record.challengerRegion ?? record.challenger_region ?? '',
+    gymLeaderLineup: record.gymLeaderLineup ?? record.gym_leader_lineup ?? '',
+    challengerLineup: record.challengerLineup ?? record.challenger_lineup ?? '',
+    engineUsed: record.engineUsed ?? record.engine_used ?? '',
+    regionFilter: record.regionFilter ?? record.region_filter ?? null,
+    typeFilter: record.typeFilter ?? record.type_filter ?? null,
+    restrictionFilter: record.restrictionFilter ?? record.restriction_filter ?? null,
+    validationCheck: record.validationCheck ?? record.validation_check ?? null,
     battlerA: record.battlerA ?? record.battler_a ?? '',
     battlerB: record.battlerB ?? record.battler_b ?? '',
     predictedWinner: record.predictedWinner ?? record.predicted_winner ?? '',
@@ -111,16 +123,34 @@ export function toDisplayBattle(record) {
 }
 
 export function toPredictionPayload({ form, matchId, timestamp }) {
+  const battlerA = form.gymLeaderName?.trim();
+  const battlerB = form.challengerName?.trim();
+  const predictedWinner =
+    form.predictedWinnerSide === 'challenger'
+      ? battlerB || 'Challenger'
+      : battlerA || 'Gym Leader';
+
   return {
     engine_name: ENGINE_NAME,
     group_name: GROUP_NAME,
     section: SECTION_PREDICTION,
     input_data_source: DATA_SOURCE,
-    match_id: matchId,
-    battler_a: form.battlerA.trim(),
-    battler_b: form.battlerB.trim(),
-    predicted_winner:
-      form.predictedWinnerSide === 'A' ? form.battlerA.trim() : form.battlerB.trim(),
+    match_id: form.matchId?.trim() || matchId,
+    matchId: form.matchId?.trim() || matchId,
+    gym_leader_name: form.gymLeaderName.trim(),
+    challenger_name: form.challengerName.trim(),
+    gym_leader_region: form.gymLeaderRegion.trim(),
+    challenger_region: form.challengerRegion.trim(),
+    gym_leader_lineup: form.gymLeaderLineup.trim(),
+    challenger_lineup: form.challengerLineup.trim(),
+    engine_used: form.engineUsed.trim(),
+    region_filter: form.regionFilter,
+    type_filter: form.typeFilter,
+    restriction_filter: form.restrictionFilter,
+    validation_check: form.validationCheck,
+    battler_a: battlerA,
+    battler_b: battlerB,
+    predicted_winner: predictedWinner,
     confidence_score: Number(form.confidence) / 100,
     prediction_reason: form.reason.trim(),
     model_used: form.model,
