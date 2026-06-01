@@ -461,6 +461,25 @@ function vectorFromFeatureObject(featureObject) {
   return FEATURE_KEYS.map((key) => toFiniteNumber(featureObject[key], 0));
 }
 
+function vectorToFeatureObject(vector) {
+  return FEATURE_KEYS.reduce((accumulator, key, index) => {
+    accumulator[key] = toFiniteNumber(vector[index], 0);
+    return accumulator;
+  }, {});
+}
+
+function normalizeFeatureVector(features) {
+  if (Array.isArray(features)) {
+    return FEATURE_KEYS.map((_, index) => toFiniteNumber(features[index], 0));
+  }
+
+  if (features && typeof features === 'object') {
+    return vectorFromFeatureObject(features);
+  }
+
+  return FEATURE_KEYS.map(() => 0);
+}
+
 function labelFromBattleRecord(record) {
   const actualWinner = String(record.actualWinner ?? record.actual_winner ?? '').trim();
   const battlerA = String(record.battlerA ?? record.battler_a ?? '').trim();
@@ -509,8 +528,11 @@ function buildTrainingExamples(history = []) {
       challengerRegion,
     );
 
+    const featureObject = buildFeatureVector(gymSummary, challengerSummary);
+
     examples.push({
-      features: buildFeatureVector(gymSummary, challengerSummary),
+      featureObject,
+      features: vectorFromFeatureObject(featureObject),
       label,
     });
   });
@@ -537,8 +559,12 @@ function variance(numbers, averageValue) {
 }
 
 function standardizeExamples(examples) {
-  const means = FEATURE_KEYS.map((_, index) => mean(examples.map((example) => example.features[index])));
-  const stds = FEATURE_KEYS.map((_, index) => Math.sqrt(variance(examples.map((example) => example.features[index]), means[index])));
+  const means = FEATURE_KEYS.map((_, index) =>
+    mean(examples.map((example) => normalizeFeatureVector(example.features)[index])),
+  );
+  const stds = FEATURE_KEYS.map((_, index) =>
+    Math.sqrt(variance(examples.map((example) => normalizeFeatureVector(example.features)[index]), means[index])),
+  );
 
   return {
     means,
@@ -566,7 +592,7 @@ function trainLogisticRegression(examples) {
     let biasGradient = 0;
 
     examples.forEach((example) => {
-      const vector = standardizeVector(example.features, means, stds);
+      const vector = standardizeVector(normalizeFeatureVector(example.features), means, stds);
       const prediction = sigmoid(weights.reduce((sum, weight, index) => sum + (weight * vector[index]), bias));
       const error = prediction - example.label;
 
@@ -586,7 +612,7 @@ function trainLogisticRegression(examples) {
 }
 
 function predictLogisticRegression(model, features) {
-  const vector = standardizeVector(features.map((value) => toFiniteNumber(value, 0)), model.means, model.stds);
+  const vector = standardizeVector(normalizeFeatureVector(features), model.means, model.stds);
   const logit = model.weights.reduce((sum, weight, index) => sum + (weight * vector[index]), model.bias);
   return sanitizeProbability(sigmoid(logit));
 }
@@ -601,7 +627,7 @@ function trainNaiveBayes(examples) {
 
   [0, 1].forEach((label) => {
     FEATURE_KEYS.forEach((key, index) => {
-      const values = grouped[label].map((example) => example.features[index]);
+      const values = grouped[label].map((example) => normalizeFeatureVector(example.features)[index]);
       const avg = mean(values);
       stats[label][key] = {
         mean: avg,
@@ -626,7 +652,7 @@ function gaussianLogProbability(value, meanValue, varianceValue) {
 }
 
 function predictNaiveBayes(model, features) {
-  const safeFeatures = features.map((value) => toFiniteNumber(value, 0));
+  const safeFeatures = normalizeFeatureVector(features);
   const scores = [0, 1].map((label) => {
     let score = Math.log(Math.max(model.priors[label], 1e-6));
     FEATURE_KEYS.forEach((key, index) => {
@@ -658,7 +684,7 @@ function splitExamples(examples, featureIndex, threshold) {
   const right = [];
 
   examples.forEach((example) => {
-    if (example.features[featureIndex] <= threshold) {
+    if (normalizeFeatureVector(example.features)[featureIndex] <= threshold) {
       left.push(example);
     } else {
       right.push(example);
@@ -697,7 +723,7 @@ function buildDecisionTree(examples, depth = 3, featurePool = FEATURE_KEYS.map((
   const currentImpurity = giniImpurity(examples);
 
   featurePool.forEach((featureIndex) => {
-    const thresholds = candidateThresholds(examples.map((example) => example.features[featureIndex]));
+    const thresholds = candidateThresholds(examples.map((example) => normalizeFeatureVector(example.features)[featureIndex]));
     thresholds.forEach((threshold) => {
       const split = splitExamples(examples, featureIndex, threshold);
       if (!split.left.length || !split.right.length) {
@@ -749,7 +775,8 @@ function predictDecisionTree(node, features) {
     return Number.isFinite(node.probability) ? node.probability : 0.5;
   }
 
-  const nextNode = features[node.featureIndex] <= node.threshold ? node.left : node.right;
+  const safeFeatures = normalizeFeatureVector(features);
+  const nextNode = safeFeatures[node.featureIndex] <= node.threshold ? node.left : node.right;
   return predictDecisionTree(nextNode, features);
 }
 
@@ -785,10 +812,12 @@ function predictKnn(model, features) {
     return 0.5;
   }
 
+  const safeFeatures = normalizeFeatureVector(features);
+
   const distances = model.examples
     .map((example) => {
       const distance = Math.sqrt(
-        example.features.reduce((sum, value, index) => sum + ((value - features[index]) ** 2), 0),
+        normalizeFeatureVector(example.features).reduce((sum, value, index) => sum + ((value - safeFeatures[index]) ** 2), 0),
       );
       return { distance, label: example.label };
     })
@@ -845,7 +874,7 @@ function trainModel(modelName, examples) {
   }
 }
 
-function predictModel(modelName, model, features, fallbackProbability) {
+function predictModel(modelName, model, features, fallbackProbability, featureObject = null) {
   if (!model || model.type === 'empty') {
     return fallbackProbability;
   }
@@ -863,7 +892,7 @@ function predictModel(modelName, model, features, fallbackProbability) {
       return predictLogisticRegression(model, features);
     case 'Rule-Based Classifier':
     default:
-      return sanitizeProbability(predictRuleBased(features));
+      return sanitizeProbability(predictRuleBased(featureObject ?? vectorToFeatureObject(features)));
   }
 }
 
@@ -915,11 +944,12 @@ export function buildBattlePrediction(form = {}, history = []) {
     const battleContext = summarizeBattleSides(form);
     const { gymLeaderSummary, challengerSummary } = battleContext;
     const currentFeatures = buildFeatureVector(gymLeaderSummary, challengerSummary);
+    const currentFeatureVector = vectorFromFeatureObject(currentFeatures);
     const trainingExamples = buildTrainingExamples(history);
     const trainingModel = trainModel(modelName, trainingExamples);
     const fallbackProbability = predictRuleBased(currentFeatures);
     const probability = trainingExamples.length
-      ? predictModel(modelName, trainingModel, currentFeatures, fallbackProbability)
+      ? predictModel(modelName, trainingModel, currentFeatureVector, fallbackProbability, currentFeatures)
       : fallbackProbability;
     const safeProbability = sanitizeProbability(probability, fallbackProbability);
     const winnerSide = safeProbability >= 0.5 ? 'gymLeader' : 'challenger';

@@ -372,15 +372,6 @@ function computeMetricsFromBattles(battles) {
   const recall = Math.round(recallRate * 100);
   const f1Rate = precisionRate + recallRate ? (2 * precisionRate * recallRate) / (precisionRate + recallRate) : 0;
   const f1 = Math.round(f1Rate * 100);
-  const brier = total
-    ? resolvedBattles.reduce((sum, battle) => {
-        const probability = sanitizeConfidence(battle.confidence_score, 0.5);
-        const actualPositive = battle.actual_winner === battle.battler_a ? 1 : 0;
-        const predictedPositive = battle.predicted_winner === battle.battler_a ? probability : 1 - probability;
-        return sum + ((predictedPositive - actualPositive) ** 2);
-      }, 0) / total
-    : null;
-
   return {
     total_battles: total,
     correct,
@@ -392,7 +383,6 @@ function computeMetricsFromBattles(battles) {
     precision_pct: precision,
     recall_pct: recall,
     f1_pct: f1,
-    brier_score: brier !== null ? Number(brier.toFixed(4)) : null,
   };
 }
 
@@ -412,6 +402,8 @@ export function nextMatchId(battles) {
 export function toDisplayBattle(record) {
   const matchId = String(record.matchId ?? record.match_id ?? record.id ?? '');
   const confidence = sanitizeConfidence(record.confidence ?? record.confidence_score ?? 0, 0.5);
+  const engineConfidence = sanitizeConfidence(record.engineConfidence ?? record.engine_confidence_score ?? 0, confidence);
+  const analystConfidence = sanitizeConfidence(record.analystConfidence ?? record.analyst_confidence_score ?? 0, confidence);
   return {
     id: matchId,
     matchId,
@@ -432,6 +424,9 @@ export function toDisplayBattle(record) {
     battlerB: record.battlerB ?? record.battler_b ?? '',
     predictedWinner: record.predictedWinner ?? record.predicted_winner ?? '',
     confidence,
+    engineConfidence,
+    analystConfidence,
+    confidenceMode: record.confidenceMode ?? record.confidence_mode ?? '',
     reason: record.reason ?? record.prediction_reason ?? '',
     model: record.model ?? record.model_used ?? '',
     timestamp: record.timestamp ?? record.timestamp_before_battle ?? record.timestamp_after_battle ?? record.created_at ?? '',
@@ -452,13 +447,18 @@ export function toPredictionPayload({ form, matchId, timestamp, prediction }) {
   const battlerB = form.challengerName?.trim();
   const { region, type } = parseRegionAndType(form.gymLeaderRegion);
   const battlePrediction = prediction ?? safeBuildBattlePrediction(form);
+  const confidenceMode = String(form.confidenceMode ?? 'auto').trim().toLowerCase() === 'manual'
+    ? 'manual'
+    : 'auto';
   const predictedWinner =
     battlePrediction.predictedWinnerSide === 'challenger'
       ? battlerB || battlePrediction.predictedWinnerName || 'Challenger'
       : battlerA || battlePrediction.predictedWinnerName || 'Gym Leader';
-  const confidenceScore = Number.isFinite(battlePrediction.confidence)
+  const engineConfidenceScore = Number.isFinite(battlePrediction.confidence)
     ? sanitizeConfidence(battlePrediction.confidence / 100, 0.5)
-    : sanitizeConfidence(Number(form.confidence) / 100, 0.5);
+    : sanitizeConfidence(0.5, 0.5);
+  const analystConfidenceScore = sanitizeConfidence(Number(form.confidence) / 100, engineConfidenceScore);
+  const confidenceScore = confidenceMode === 'manual' ? analystConfidenceScore : engineConfidenceScore;
   const analystNote = form.reason.trim();
   const predictionReason = analystNote
     ? `${battlePrediction.reason?.trim() || 'Rule-based matchup analysis'} | Analyst note: ${analystNote}`
@@ -483,6 +483,9 @@ export function toPredictionPayload({ form, matchId, timestamp, prediction }) {
     battler_b: battlerB,
     predicted_winner: predictedWinner,
     confidence_score: confidenceScore,
+    engine_confidence_score: engineConfidenceScore,
+    analyst_confidence_score: analystConfidenceScore,
+    confidence_mode: confidenceMode,
     prediction_reason: predictionReason,
     model_used: modelUsed,
     timestamp_before_battle: timestamp,

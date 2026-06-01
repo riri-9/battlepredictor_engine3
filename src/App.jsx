@@ -70,7 +70,6 @@ const specMetrics = [
 ];
 
 const specProbabilityMetrics = [
-  ['Brier Score', 'Measures quality of probability predictions'],
   ['Log Loss', 'Penalizes confident but wrong predictions'],
   ['Calibration Table', 'Checks if confidence levels match actual results'],
 ];
@@ -120,6 +119,13 @@ function normalizeMatchId(value) {
     .trim()
     .toLowerCase()
     .replace(/^#/, '')
+    .replace(/[^a-z0-9]+/g, '');
+}
+
+function normalizeModelName(value) {
+  return String(value ?? '')
+    .trim()
+    .toLowerCase()
     .replace(/[^a-z0-9]+/g, '');
 }
 
@@ -185,7 +191,6 @@ function calculateLocalMetrics(battles) {
   const correct = resolvedBattles.filter((battle) => battle.predictedWinner === battle.actualWinner).length;
   const precisionRate = tp + fp ? tp / (tp + fp) : 0;
   const recallRate = tp + fn ? tp / (tp + fn) : 0;
-
   return {
     total_battles: total,
     correct,
@@ -198,6 +203,17 @@ function calculateLocalMetrics(battles) {
     recall_pct: Math.round(recallRate * 100),
     f1_pct: Math.round(((precisionRate + recallRate) ? (2 * precisionRate * recallRate) / (precisionRate + recallRate) : 0) * 100),
   };
+}
+
+function getAvailableModels(battles) {
+  return [
+    'all',
+    ...new Set(
+      battles
+        .map((battle) => String(battle.model ?? '').trim())
+        .filter(Boolean),
+    ),
+  ];
 }
 
 function App() {
@@ -226,6 +242,7 @@ function App() {
     restrictionFilter: true,
     validationCheck: true,
     model: 'Random Forest',
+    confidenceMode: 'auto',
     predictedWinnerSide: 'gymLeader',
     confidence: 70,
     reason: '',
@@ -245,6 +262,7 @@ function App() {
   const [auditLog, setAuditLog] = useState([]);
   const [isLoadingMetrics, setIsLoadingMetrics] = useState(false);
   const [isLoadingAudit, setIsLoadingAudit] = useState(false);
+  const [analyticsModelFilter, setAnalyticsModelFilter] = useState('all');
 
   const localMetrics = useMemo(() => calculateLocalMetrics(predictions), [predictions]);
   const metricsSnapshot = metrics ?? localMetrics;
@@ -406,6 +424,7 @@ function App() {
         challengerLineup: '',
         engineUsed: '',
         model: 'Random Forest',
+        confidenceMode: 'auto',
         predictedWinnerSide: 'gymLeader',
         confidence: 70,
         reason: '',
@@ -432,6 +451,7 @@ function App() {
         challengerLineup: '',
         engineUsed: '',
         model: 'Random Forest',
+        confidenceMode: 'auto',
         predictedWinnerSide: 'gymLeader',
         confidence: 70,
         reason: '',
@@ -555,10 +575,10 @@ function App() {
   return (
     <div className="relative min-h-screen overflow-hidden bg-[#05050d] text-slate-100">
       <div className="pointer-events-none absolute inset-0 subtle-grid opacity-25" />
-      <div className="pointer-events-none absolute -left-24 top-0 h-80 w-80 rounded-full bg-arena-400/10 blur-3xl animate-drift" />
-      <div className="pointer-events-none absolute right-0 top-24 h-96 w-96 rounded-full bg-sky-400/10 blur-3xl animate-drift" />
+      <div className="pointer-events-none absolute -left-24 top-0 h-80 w-80 rounded-full bg-arena-400/6 blur-2xl" />
+      <div className="pointer-events-none absolute right-0 top-24 h-96 w-96 rounded-full bg-sky-400/6 blur-2xl" />
 
-      <header className="fixed inset-x-0 top-0 z-50 border-b border-arena-400/15 bg-[#05050d]/72 px-4 py-4 backdrop-blur-xl md:px-8">
+      <header className="fixed inset-x-0 top-0 z-50 border-b border-arena-400/15 bg-[#05050d]/88 px-4 py-4 backdrop-blur-sm md:px-8">
         <div className="mx-auto flex max-w-[1440px] items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <div className="flex h-11 w-11 items-center justify-center rounded-full border border-arena-400/40 bg-gradient-to-br from-red-500 via-red-400 to-arena-400 shadow-glow">
@@ -667,6 +687,8 @@ function App() {
             metrics={metrics}
             isLoading={isLoadingMetrics}
             predictions={predictions}
+            modelFilter={analyticsModelFilter}
+            setModelFilter={setAnalyticsModelFilter}
             onRefresh={async () => {
               if (!isBackendConfigured()) return;
               setIsLoadingMetrics(true);
@@ -701,8 +723,8 @@ function App() {
 
 function PredictViewLegacy({ form, setForm, predictions, onGenerate }) {
   return (
-    <div className="grid gap-6 xl:grid-cols-[minmax(340px,520px)_1fr]">
-      <section className="glass-panel rounded-[28px] p-5 shadow-soft md:p-6">
+    <div className="grid gap-6 xl:grid-cols-[minmax(340px,520px)_1fr] xl:h-[calc(100vh-12rem)] xl:overflow-hidden">
+      <section className="glass-panel rounded-[28px] p-5 shadow-soft md:p-6 xl:sticky xl:top-32 xl:self-start xl:h-fit xl:max-h-[calc(100vh-12rem)] xl:overflow-y-auto xl:pr-4">
         <div className="mb-5 flex items-start justify-between gap-4">
           <div>
             <h2 className="font-display text-2xl font-bold text-slate-100">
@@ -759,8 +781,29 @@ function PredictViewLegacy({ form, setForm, predictions, onGenerate }) {
         </div>
 
         <div className="mt-5">
+          <div className="mb-3 flex flex-wrap gap-2">
+            {[
+              { value: 'auto', label: 'Auto (Engine)' },
+              { value: 'manual', label: 'Manual Override' },
+            ].map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() =>
+                  setForm((current) => ({ ...current, confidenceMode: option.value }))
+                }
+                className={`rounded-full border px-3 py-2 font-mono text-[10px] font-bold uppercase tracking-[0.24em] transition ${
+                  form.confidenceMode === option.value
+                    ? 'border-arena-400/60 bg-arena-400/15 text-arena-300 shadow-glow'
+                    : 'border-white/10 bg-white/5 text-slate-400 hover:border-arena-400/35 hover:text-slate-200'
+                }`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
           <label className="mb-2 block font-mono text-xs uppercase tracking-[0.32em] text-slate-400">
-            Confidence Score
+            {form.confidenceMode === 'manual' ? 'Analyst Confidence' : 'Engine Confidence'}
           </label>
           <div className="flex items-center gap-3">
             <input
@@ -768,15 +811,23 @@ function PredictViewLegacy({ form, setForm, predictions, onGenerate }) {
               min="1"
               max="100"
               value={form.confidence}
+              disabled={form.confidenceMode !== 'manual'}
               onChange={(event) =>
                 setForm((current) => ({ ...current, confidence: Number(event.target.value) }))
               }
-              className="h-2 w-full cursor-pointer appearance-none rounded-full bg-white/15 accent-arena-400"
+              className={`h-2 w-full appearance-none rounded-full bg-white/15 accent-arena-400 ${
+                form.confidenceMode !== 'manual' ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
+              }`}
             />
             <span className="min-w-14 text-right font-display text-sm font-bold text-arena-400">
-              {form.confidence}%
+              {form.confidenceMode === 'manual' ? form.confidence : enginePrediction.confidence}%
             </span>
           </div>
+          <p className="mt-2 font-mono text-[11px] uppercase tracking-[0.24em] text-slate-500">
+            {form.confidenceMode === 'manual'
+              ? 'Manual override is active and will be saved with this prediction.'
+              : 'Auto mode uses the engine confidence from the selected model.'}
+          </p>
         </div>
 
         <div className="mt-5">
@@ -818,7 +869,7 @@ function PredictViewLegacy({ form, setForm, predictions, onGenerate }) {
         </button>
       </section>
 
-      <section className="space-y-4">
+      <section className="space-y-4 xl:h-full xl:overflow-y-auto xl:pr-2">
         <div className="flex items-center justify-between">
           <div>
             <h2 className="font-display text-xl font-bold uppercase tracking-[0.2em] text-slate-100">
@@ -855,7 +906,40 @@ function PredictView({
   recall,
   f1Score,
 }) {
-  const enginePrediction = safeBuildBattlePrediction(form, predictions);
+  const engineInputs = {
+    matchId: form.matchId,
+    gymLeaderName: form.gymLeaderName,
+    challengerName: form.challengerName,
+    gymLeaderRegion: form.gymLeaderRegion,
+    challengerRegion: form.challengerRegion,
+    gymLeaderLineup: form.gymLeaderLineup,
+    challengerLineup: form.challengerLineup,
+    engineUsed: form.engineUsed,
+    model: form.model,
+    regionFilter: form.regionFilter,
+    typeFilter: form.typeFilter,
+    restrictionFilter: form.restrictionFilter,
+    validationCheck: form.validationCheck,
+  };
+  const enginePrediction = useMemo(
+    () => safeBuildBattlePrediction(engineInputs, predictions),
+    [
+      engineInputs.matchId,
+      engineInputs.gymLeaderName,
+      engineInputs.challengerName,
+      engineInputs.gymLeaderRegion,
+      engineInputs.challengerRegion,
+      engineInputs.gymLeaderLineup,
+      engineInputs.challengerLineup,
+      engineInputs.engineUsed,
+      engineInputs.model,
+      engineInputs.regionFilter,
+      engineInputs.typeFilter,
+      engineInputs.restrictionFilter,
+      engineInputs.validationCheck,
+      predictions,
+    ],
+  );
   const timestamp = new Date().toLocaleString('en-US', {
     month: 'short',
     day: 'numeric',
@@ -965,12 +1049,33 @@ function PredictView({
           </div>
 
           <div className="mt-4">
+            <div className="mb-3 flex flex-wrap gap-2">
+              {[
+                { value: 'auto', label: 'Auto (Engine)' },
+                { value: 'manual', label: 'Manual Override' },
+              ].map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() =>
+                    setForm((current) => ({ ...current, confidenceMode: option.value }))
+                  }
+                  className={`rounded-full border px-3 py-2 font-mono text-[10px] font-bold uppercase tracking-[0.24em] transition ${
+                    form.confidenceMode === option.value
+                      ? 'border-arena-400/60 bg-arena-400/15 text-arena-300 shadow-glow'
+                      : 'border-white/10 bg-white/5 text-slate-400 hover:border-arena-400/35 hover:text-slate-200'
+                  }`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
             <div className="mb-2 flex items-center justify-between gap-3">
               <label className="block font-mono text-xs uppercase tracking-[0.32em] text-slate-400">
-                Confidence
+                {form.confidenceMode === 'manual' ? 'Analyst Confidence' : 'Engine Confidence'}
               </label>
               <span className="font-display text-sm font-bold text-arena-400">
-                {form.confidence}%
+                {form.confidenceMode === 'manual' ? form.confidence : enginePrediction.confidence}%
               </span>
             </div>
             <div className="flex items-center gap-3">
@@ -979,16 +1084,24 @@ function PredictView({
                 min="1"
                 max="100"
                 value={form.confidence}
+                disabled={form.confidenceMode !== 'manual'}
                 onChange={(event) =>
                   setForm((current) => ({ ...current, confidence: Number(event.target.value) }))
                 }
-                className="h-2 w-full cursor-pointer appearance-none rounded-full bg-white/15 accent-arena-400"
+                className={`h-2 w-full appearance-none rounded-full bg-white/15 accent-arena-400 ${
+                  form.confidenceMode !== 'manual' ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
+                }`}
               />
             </div>
             <div className="mt-2 flex items-center justify-between font-mono text-[11px] uppercase tracking-[0.24em] text-slate-500">
               <span>1%</span>
               <span>100%</span>
             </div>
+            <p className="mt-2 font-mono text-[11px] uppercase tracking-[0.24em] text-slate-500">
+              {form.confidenceMode === 'manual'
+                ? 'Manual override is active and will be saved with this prediction.'
+                : 'Auto mode uses the engine confidence from the selected model.'}
+            </p>
           </div>
 
           <div className="mt-4">
@@ -997,7 +1110,7 @@ function PredictView({
                 Predicted Winner
               </label>
               <span className="rounded-full border border-arena-400/30 bg-arena-400/10 px-3 py-1 font-mono text-[10px] font-bold uppercase tracking-[0.28em] text-arena-400">
-                Auto
+                {form.confidenceMode === 'manual' ? 'Manual' : 'Auto'}
               </span>
             </div>
             <div className="rounded-2xl border border-arena-400/20 bg-arena-400/5 p-4">
@@ -1007,12 +1120,24 @@ function PredictView({
               <p className="mt-2 font-mono text-xs leading-5 text-slate-400">
                 Generated from the matchup inputs, cached PokéAPI data, and rule-based scoring.
               </p>
+              <p className="mt-2 font-mono text-[11px] uppercase tracking-[0.24em] text-slate-500">
+                {form.confidenceMode === 'manual'
+                  ? 'This preview uses the manual override confidence.'
+                  : 'This preview uses the engine confidence.'}
+              </p>
               <p className="mt-2 font-mono text-xs leading-5 text-slate-300">
                 {enginePrediction.reason}
               </p>
+              {form.confidenceMode === 'manual' ? (
+                <p className="mt-2 font-mono text-[11px] uppercase tracking-[0.24em] text-slate-500">
+                  Manual override applied: confidence set to {form.confidence}%.
+                </p>
+              ) : null}
               <div className="mt-3 flex flex-wrap gap-2 font-mono text-[11px] uppercase tracking-[0.24em] text-slate-300">
                 <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1">
-                  Confidence {enginePrediction.confidence}%
+                  {form.confidenceMode === 'manual'
+                    ? `Manual Confidence ${form.confidence}%`
+                    : `Engine Confidence ${enginePrediction.confidence}%`}
                 </span>
                 <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1">
                   Model {enginePrediction.model}
@@ -1177,8 +1302,8 @@ function RequirementsViewExact() {
 
 function GroundTruthView({ form, setForm, battles, selectedBattle, onSubmit, accuracy }) {
   return (
-    <div className="grid gap-6 xl:grid-cols-[minmax(340px,520px)_1fr]">
-      <section className="glass-panel rounded-[28px] p-5 shadow-soft md:p-6">
+    <div className="grid gap-6 xl:grid-cols-[minmax(340px,520px)_1fr] xl:items-start">
+      <section className="glass-panel rounded-[28px] p-5 shadow-soft md:p-6 xl:sticky xl:top-32 xl:self-start">
         <div className="mb-5 flex items-start justify-between gap-4">
           <div>
             <h2 className="font-display text-2xl font-bold text-slate-100">
@@ -1543,7 +1668,10 @@ function PredictionCard({ battle }) {
   const confidence = toConfidenceValue(battle.confidence, 0.5);
 
   return (
-    <article className="glass-panel rounded-[24px] p-5 shadow-soft transition hover:-translate-y-0.5 hover:border-arena-400/35">
+    <article
+      style={{ contentVisibility: 'auto', containIntrinsicSize: '520px' }}
+      className="glass-panel rounded-[24px] p-5 shadow-soft transition hover:-translate-y-0.5 hover:border-arena-400/35"
+    >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-full border border-arena-400/25 bg-white/5 text-arena-400">
@@ -1631,7 +1759,16 @@ function ResultCard({ battle }) {
   const confidence = toConfidenceValue(battle.confidence, 0.5);
 
   return (
-    <article className="glass-panel rounded-[24px] p-5 shadow-soft transition hover:-translate-y-0.5">
+    <article
+      style={{ contentVisibility: 'auto', containIntrinsicSize: '620px' }}
+      className={`glass-panel rounded-[24px] p-5 shadow-soft transition hover:-translate-y-0.5 ${
+        battle.actualWinner
+          ? statusCorrect
+            ? 'ring-1 ring-emerald-400/20'
+            : 'ring-1 ring-rose-400/20'
+          : 'ring-1 ring-amber-400/15'
+      }`}
+    >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="font-mono text-xs uppercase tracking-[0.32em] text-arena-400">
@@ -1646,6 +1783,30 @@ function ResultCard({ battle }) {
           <Badge tone={battle.actualWinner ? (statusCorrect ? 'success' : 'danger') : 'warning'}>
             {battle.actualWinner ? (statusCorrect ? 'Prediction Correct' : 'Prediction Missed') : 'Pending'}
           </Badge>
+        </div>
+      </div>
+
+      <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div className="font-mono text-[11px] uppercase tracking-[0.28em] text-slate-500">
+              Battle Outcome
+            </div>
+            <div className="mt-1 font-display text-xl font-bold text-slate-100">
+              {battle.actualWinner ? `${battle.actualWinner} takes the win` : 'Awaiting ground truth'}
+            </div>
+          </div>
+          <div
+            className={`rounded-full px-3 py-1 font-mono text-[10px] font-bold uppercase tracking-[0.24em] ${
+              battle.actualWinner
+                ? statusCorrect
+                  ? 'bg-emerald-400/15 text-emerald-300'
+                  : 'bg-rose-400/15 text-rose-300'
+                : 'bg-amber-400/15 text-amber-300'
+            }`}
+          >
+            {battle.actualWinner ? (statusCorrect ? 'Prediction Correct' : 'Prediction Missed') : 'Pending'}
+          </div>
         </div>
       </div>
 
@@ -1665,6 +1826,105 @@ function ResultCard({ battle }) {
             className="h-3 rounded-full bg-gradient-to-r from-arena-300 via-arena-400 to-arena-100 shadow-[0_0_20px_rgba(255,215,0,0.35)]"
             style={{ width: `${confidence * 100}%` }}
           />
+        </div>
+      </div>
+
+      <div className="mt-5 rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-4">
+        <div className="font-mono text-[11px] uppercase tracking-[0.28em] text-emerald-300">
+          Battle Summary
+        </div>
+        <div className="mt-2 font-display text-lg font-bold text-emerald-100">
+          Winner: {battle.actualWinner || predictedWinner}
+        </div>
+      </div>
+
+      <div className="mt-5 grid gap-3 md:grid-cols-2">
+        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+          <div className="font-mono text-[11px] uppercase tracking-[0.28em] text-slate-500">
+            {gymLeaderName} Team
+          </div>
+          <p className="mt-2 font-mono text-sm leading-6 text-slate-300">
+            {battle.gymLeaderLineup || 'Pending'}
+          </p>
+        </div>
+        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+          <div className="font-mono text-[11px] uppercase tracking-[0.28em] text-slate-500">
+            {challengerName} Team
+          </div>
+          <p className="mt-2 font-mono text-sm leading-6 text-slate-300">
+            {battle.challengerLineup || 'Pending'}
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-5 rounded-2xl border border-cyan-400/20 bg-cyan-400/10 p-4">
+        <div className="font-mono text-[11px] uppercase tracking-[0.28em] text-cyan-300">
+          Quick Access
+        </div>
+        <div className="mt-3 flex flex-wrap gap-3">
+          {battle.replayLink ? (
+            <a
+              href={battle.replayLink}
+              target="_blank"
+              rel="noreferrer"
+              className="rounded-full border border-cyan-400/40 bg-cyan-400/15 px-4 py-2 font-mono text-xs font-bold uppercase tracking-[0.24em] text-cyan-200 transition hover:bg-cyan-400/25"
+            >
+              Open Replay Site
+            </a>
+          ) : (
+            <span className="rounded-full border border-white/10 bg-white/5 px-4 py-2 font-mono text-xs uppercase tracking-[0.24em] text-slate-500">
+              Replay pending
+            </span>
+          )}
+
+          {battle.screenshotPreview ? (
+            <a
+              href={battle.screenshotPreview}
+              target="_blank"
+              rel="noreferrer"
+              className="rounded-full border border-emerald-400/40 bg-emerald-400/15 px-4 py-2 font-mono text-xs font-bold uppercase tracking-[0.24em] text-emerald-200 transition hover:bg-emerald-400/25"
+            >
+              View Screenshot
+            </a>
+          ) : (
+            <span className="rounded-full border border-white/10 bg-white/5 px-4 py-2 font-mono text-xs uppercase tracking-[0.24em] text-slate-500">
+              Screenshot pending
+            </span>
+          )}
+        </div>
+      </div>
+
+      <div className="mt-5 grid gap-3 md:grid-cols-[1.1fr_0.9fr]">
+        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+          <div className="font-mono text-[11px] uppercase tracking-[0.28em] text-slate-500">
+            Winner Summary
+          </div>
+          <p className="mt-2 font-display text-lg font-bold text-slate-100">
+            {battle.actualWinner
+              ? `${battle.actualWinner} outlasted ${battle.actualWinner === gymLeaderName ? challengerName : gymLeaderName}`
+              : 'No final result recorded yet'}
+          </p>
+          <p className="mt-2 font-mono text-xs leading-5 text-slate-400">
+            {battle.reason || 'Prediction reason not saved yet.'}
+          </p>
+        </div>
+        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+          <div className="font-mono text-[11px] uppercase tracking-[0.28em] text-slate-500">
+            MVP Spotlight
+          </div>
+          <div className="mt-2 flex items-center gap-3">
+            <div className="flex h-12 w-12 items-center justify-center rounded-full border border-amber-400/30 bg-amber-400/10 text-2xl">
+              ⭐
+            </div>
+            <div>
+              <div className="font-display text-lg font-bold text-amber-200">
+                {battle.mvp || 'Pending'}
+              </div>
+              <div className="font-mono text-xs uppercase tracking-[0.24em] text-slate-500">
+                Most impactful Pokémon
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1712,7 +1972,16 @@ function HistoryCard({ battle }) {
   const confidence = toConfidenceValue(battle.confidence, 0.5);
 
   return (
-    <article className="glass-panel rounded-[24px] p-5 shadow-soft">
+    <article
+      style={{ contentVisibility: 'auto', containIntrinsicSize: '620px' }}
+      className={`glass-panel rounded-[24px] p-5 shadow-soft ${
+        battle.actualWinner
+          ? statusCorrect
+            ? 'ring-1 ring-emerald-400/15'
+            : 'ring-1 ring-rose-400/15'
+          : 'ring-1 ring-amber-400/10'
+      }`}
+    >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="font-mono text-xs uppercase tracking-[0.32em] text-arena-400">
@@ -1750,6 +2019,56 @@ function HistoryCard({ battle }) {
         </div>
       </div>
 
+      <div className="mt-5 rounded-2xl border border-white/10 bg-white/5 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div className="font-mono text-[11px] uppercase tracking-[0.28em] text-slate-500">
+              Battle Outcome
+            </div>
+            <div className="mt-1 font-display text-xl font-bold text-slate-100">
+              {battle.actualWinner ? `${battle.actualWinner} won this battle` : 'Awaiting final result'}
+            </div>
+          </div>
+          <div
+            className={`rounded-full px-3 py-1 font-mono text-[10px] font-bold uppercase tracking-[0.24em] ${
+              battle.actualWinner
+                ? statusCorrect
+                  ? 'bg-emerald-400/15 text-emerald-300'
+                  : 'bg-rose-400/15 text-rose-300'
+                : 'bg-amber-400/15 text-amber-300'
+            }`}
+          >
+            {battle.actualWinner ? (statusCorrect ? 'Correct' : 'Missed') : 'Pending'}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-5 grid gap-3 md:grid-cols-[1fr_0.9fr]">
+        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+          <div className="font-mono text-[11px] uppercase tracking-[0.28em] text-slate-500">
+            Winner Summary
+          </div>
+          <p className="mt-2 font-display text-lg font-bold text-slate-100">
+            {battle.actualWinner
+              ? `${battle.actualWinner} over ${battle.actualWinner === gymLeaderName ? challengerName : gymLeaderName}`
+              : 'No resolved battle yet'}
+          </p>
+        </div>
+        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+          <div className="font-mono text-[11px] uppercase tracking-[0.28em] text-slate-500">
+            MVP Spotlight
+          </div>
+          <div className="mt-2 flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-full border border-amber-400/30 bg-amber-400/10 text-lg">
+              ⭐
+            </div>
+            <div className="font-display text-base font-bold text-amber-200">
+              {battle.mvp || 'Pending'}
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div className="mt-5">
         <div className="mb-2 flex items-center justify-between font-mono text-xs uppercase tracking-[0.3em] text-slate-400">
           <span>Confidence</span>
@@ -1760,6 +2079,71 @@ function HistoryCard({ battle }) {
             className="h-3 rounded-full bg-gradient-to-r from-arena-300 via-arena-400 to-arena-100 shadow-[0_0_20px_rgba(255,215,0,0.35)]"
             style={{ width: `${confidence * 100}%` }}
           />
+        </div>
+      </div>
+
+      <div className="mt-5 rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-4">
+        <div className="font-mono text-[11px] uppercase tracking-[0.28em] text-emerald-300">
+          Battle Summary
+        </div>
+        <div className="mt-2 font-display text-lg font-bold text-emerald-100">
+          Winner: {battle.actualWinner || predictedWinner}
+        </div>
+      </div>
+
+      <div className="mt-5 grid gap-3 md:grid-cols-2">
+        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+          <div className="font-mono text-[11px] uppercase tracking-[0.28em] text-slate-500">
+            {gymLeaderName} Team
+          </div>
+          <p className="mt-2 font-mono text-sm leading-6 text-slate-300">
+            {battle.gymLeaderLineup || 'Pending'}
+          </p>
+        </div>
+        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+          <div className="font-mono text-[11px] uppercase tracking-[0.28em] text-slate-500">
+            {challengerName} Team
+          </div>
+          <p className="mt-2 font-mono text-sm leading-6 text-slate-300">
+            {battle.challengerLineup || 'Pending'}
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-5 rounded-2xl border border-cyan-400/20 bg-cyan-400/10 p-4">
+        <div className="font-mono text-[11px] uppercase tracking-[0.28em] text-cyan-300">
+          Quick Access
+        </div>
+        <div className="mt-3 flex flex-wrap gap-3">
+          {battle.replayLink ? (
+            <a
+              href={battle.replayLink}
+              target="_blank"
+              rel="noreferrer"
+              className="rounded-full border border-cyan-400/40 bg-cyan-400/15 px-4 py-2 font-mono text-xs font-bold uppercase tracking-[0.24em] text-cyan-200 transition hover:bg-cyan-400/25"
+            >
+              Open Replay Site
+            </a>
+          ) : (
+            <span className="rounded-full border border-white/10 bg-white/5 px-4 py-2 font-mono text-xs uppercase tracking-[0.24em] text-slate-500">
+              Replay pending
+            </span>
+          )}
+
+          {battle.screenshotPreview ? (
+            <a
+              href={battle.screenshotPreview}
+              target="_blank"
+              rel="noreferrer"
+              className="rounded-full border border-emerald-400/40 bg-emerald-400/15 px-4 py-2 font-mono text-xs font-bold uppercase tracking-[0.24em] text-emerald-200 transition hover:bg-emerald-400/25"
+            >
+              View Screenshot
+            </a>
+          ) : (
+            <span className="rounded-full border border-white/10 bg-white/5 px-4 py-2 font-mono text-xs uppercase tracking-[0.24em] text-slate-500">
+              Screenshot pending
+            </span>
+          )}
         </div>
       </div>
 
@@ -1782,11 +2166,18 @@ function HistoryCard({ battle }) {
 
       <p className="mt-4 font-mono text-sm leading-6 text-slate-300">{battle.reason}</p>
       {battle.screenshotPreview ? (
-        <img
-          src={battle.screenshotPreview}
-          alt={`Proof for match ${battle.id}`}
-          className="mt-4 max-h-72 w-full rounded-2xl border border-white/10 object-cover"
-        />
+        <a
+          href={battle.screenshotPreview}
+          target="_blank"
+          rel="noreferrer"
+          className="mt-4 block overflow-hidden rounded-2xl border border-white/10 bg-slate-950/50"
+        >
+          <img
+            src={battle.screenshotPreview}
+            alt={`Proof for match ${battle.id}`}
+            className="max-h-72 w-full object-cover"
+          />
+        </a>
       ) : null}
     </article>
   );
@@ -2013,40 +2404,78 @@ function ShieldIcon({ className }) {
 // ══════════════════════════════════════════════════════════════════════════════
 // ANALYTICS VIEW — Confusion Matrix + ML Metrics (from battles table)
 // ══════════════════════════════════════════════════════════════════════════════
-function AnalyticsView({ metrics, isLoading, predictions, onRefresh }) {
+function AnalyticsView({ metrics, isLoading, predictions, modelFilter, setModelFilter, onRefresh }) {
   useEffect(() => { onRefresh(); }, []);
 
-  const resolved = predictions.filter(b => b.actualWinner);
-  const tp = metrics?.tp ?? 0;
-  const fp = metrics?.fp ?? 0;
-  const fn = metrics?.fn ?? 0;
-  const tn = metrics?.tn ?? 0;
+  const availableModels = useMemo(() => getAvailableModels(predictions), [predictions]);
+  const filteredBattles = useMemo(
+    () =>
+      modelFilter === 'all'
+        ? predictions
+        : predictions.filter((battle) => normalizeModelName(battle.model) === normalizeModelName(modelFilter)),
+    [predictions, modelFilter],
+  );
+  const resolved = filteredBattles.filter((battle) => battle.actualWinner);
+  const localFilteredMetrics = useMemo(() => calculateLocalMetrics(filteredBattles), [filteredBattles]);
+  const displayMetrics = modelFilter === 'all' ? (metrics ?? localFilteredMetrics) : localFilteredMetrics;
+  const tp = displayMetrics?.tp ?? 0;
+  const fp = displayMetrics?.fp ?? 0;
+  const fn = displayMetrics?.fn ?? 0;
+  const tn = displayMetrics?.tn ?? 0;
+  const modelLabel = modelFilter === 'all' ? 'All Models' : modelFilter;
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="font-display text-2xl font-bold text-slate-100">📊 Analytics Dashboard</h2>
-          <p className="mt-1 font-mono text-xs uppercase tracking-[0.32em] text-slate-500">
-            Live ML metrics from Supabase battles table
-          </p>
+      <div className="glass-panel rounded-[28px] border border-arena-400/20 p-5 shadow-soft md:p-6">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h2 className="font-display text-2xl font-bold text-slate-100">📊 Analytics Dashboard</h2>
+            <p className="mt-1 font-mono text-xs uppercase tracking-[0.32em] text-slate-500">
+              Live ML metrics from Supabase battles table
+            </p>
+          </div>
+          <button
+            onClick={onRefresh}
+            disabled={isLoading}
+            className="rounded-2xl border border-arena-400/40 bg-arena-400/10 px-4 py-2 font-mono text-xs font-bold uppercase tracking-[0.2em] text-arena-400 transition hover:bg-arena-400/20"
+          >
+            {isLoading ? 'Loading...' : '↻ Refresh'}
+          </button>
         </div>
-        <button
-          onClick={onRefresh}
-          disabled={isLoading}
-          className="rounded-2xl border border-arena-400/40 bg-arena-400/10 px-4 py-2 font-mono text-xs font-bold uppercase tracking-[0.2em] text-arena-400 transition hover:bg-arena-400/20"
-        >
-          {isLoading ? 'Loading...' : '↻ Refresh'}
-        </button>
+
+        <div className="mt-5 flex flex-wrap justify-center gap-2">
+          {availableModels.map((model) => {
+            const count =
+              model === 'all'
+                ? predictions.length
+                : predictions.filter((battle) => normalizeModelName(battle.model) === normalizeModelName(model)).length;
+            const active = modelFilter === model;
+            return (
+              <button
+                key={model}
+                onClick={() => setModelFilter(model)}
+                className={`rounded-full px-4 py-2 font-mono text-xs font-bold uppercase tracking-[0.24em] transition ${
+                  active
+                    ? 'border border-arena-400/60 bg-arena-400/15 text-arena-300 shadow-glow'
+                    : 'border border-white/10 bg-white/5 text-slate-400 hover:border-arena-400/30 hover:text-slate-200'
+                }`}
+              >
+                {model === 'all' ? 'All Models' : model}
+                <span className="ml-2 rounded-full bg-black/25 px-2 py-0.5 text-[10px]">
+                  {count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* ML Metric Cards */}
-      <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-        <MetricCard label="Accuracy" value={metrics ? `${metrics.accuracy_pct}%` : '—'} accent />
-        <MetricCard label="Precision" value={metrics ? `${metrics.precision_pct ?? '—'}%` : '—'} />
-        <MetricCard label="Recall" value={metrics ? `${metrics.recall_pct ?? '—'}%` : '—'} />
-        <MetricCard label="F1-Score" value={metrics ? `${metrics.f1_pct ?? '—'}%` : '—'} />
-        <MetricCard label="Brier Score" value={metrics ? `${metrics.brier_score ?? '—'}` : '—'} />
+      <section className="mx-auto grid max-w-6xl gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <MetricCard label="Accuracy" value={displayMetrics ? `${displayMetrics.accuracy_pct}%` : '—'} accent />
+        <MetricCard label="Precision" value={displayMetrics ? `${displayMetrics.precision_pct ?? '—'}%` : '—'} />
+        <MetricCard label="Recall" value={displayMetrics ? `${displayMetrics.recall_pct ?? '—'}%` : '—'} />
+        <MetricCard label="F1-Score" value={displayMetrics ? `${displayMetrics.f1_pct ?? '—'}%` : '—'} />
       </section>
 
       {/* Confusion Matrix */}
@@ -2083,7 +2512,7 @@ function AnalyticsView({ metrics, isLoading, predictions, onRefresh }) {
           </div>
         </div>
         <p className="mt-4 text-center font-mono text-xs text-slate-500">
-          {metrics?.total_battles ?? 0} resolved battles · {metrics?.correct ?? 0} correct predictions
+          {displayMetrics?.total_battles ?? 0} resolved battles · {displayMetrics?.correct ?? 0} correct predictions · {modelLabel}
         </p>
       </section>
 
