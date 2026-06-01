@@ -4,6 +4,6 @@ dist/
 .env.local
 .env.development
 .env.production
-.vercel/
+.vercel
 *.sql
 *.md
