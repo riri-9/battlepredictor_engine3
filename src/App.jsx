@@ -1752,6 +1752,8 @@ function PredictionCard({ battle }) {
 }
 
 function ResultCard({ battle }) {
+  return <BattleResultCard battle={battle} />;
+
   const statusCorrect = battle.actualWinner && battle.actualWinner === battle.predictedWinner;
   const gymLeaderName = battle.gymLeaderName || battle.battlerA || 'Gym Leader';
   const challengerName = battle.challengerName || battle.battlerB || 'Challenger';
@@ -1965,6 +1967,8 @@ function ResultCard({ battle }) {
 }
 
 function HistoryCard({ battle }) {
+  return <BattleResultCard battle={battle} />;
+
   const statusCorrect = battle.actualWinner && battle.actualWinner === battle.predictedWinner;
   const gymLeaderName = battle.gymLeaderName || battle.battlerA || 'Gym Leader';
   const challengerName = battle.challengerName || battle.battlerB || 'Challenger';
@@ -2180,6 +2184,216 @@ function HistoryCard({ battle }) {
         </a>
       ) : null}
     </article>
+  );
+}
+
+function BattleResultCard({ battle }) {
+  const statusCorrect = Boolean(battle.actualWinner && battle.actualWinner === battle.predictedWinner);
+  const gymLeaderName = battle.gymLeaderName || battle.battlerA || 'Gym Leader';
+  const challengerName = battle.challengerName || battle.battlerB || 'Challenger';
+  const predictedWinner = battle.predictedWinner || 'Pending';
+  const actualWinner = battle.actualWinner || 'Pending';
+  const confidence = toConfidenceValue(battle.confidence, 0.5);
+  const confidencePercent = Math.round(confidence * 100);
+  const statusTone = battle.actualWinner ? (statusCorrect ? 'success' : 'danger') : 'warning';
+  const statusLabel = battle.actualWinner ? (statusCorrect ? 'Correct' : 'Missed') : 'Pending';
+  const outcomeText = battle.actualWinner
+    ? `${battle.actualWinner} won this battle`
+    : 'Awaiting final result';
+
+  return (
+    <article
+      style={{ contentVisibility: 'auto', containIntrinsicSize: '620px' }}
+      className={`glass-panel mx-auto w-full max-w-5xl rounded-[24px] p-5 shadow-soft transition hover:-translate-y-0.5 md:p-6 ${
+        battle.actualWinner
+          ? statusCorrect
+            ? 'ring-1 ring-emerald-400/20'
+            : 'ring-1 ring-rose-400/20'
+          : 'ring-1 ring-amber-400/15'
+      }`}
+    >
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0">
+          <div className="font-mono text-xs uppercase tracking-[0.32em] text-arena-400">
+            Match #{battle.id}
+          </div>
+          <div className="mt-1 break-words font-display text-xl font-bold text-slate-100 md:text-2xl">
+            {gymLeaderName} vs {challengerName}
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge>{battle.model || 'Model Pending'}</Badge>
+          <Badge tone={statusTone}>{statusLabel}</Badge>
+        </div>
+      </div>
+
+      <section className="mx-auto mt-6 max-w-4xl rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-5">
+        <div className="grid gap-5 text-center md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] md:items-center">
+          <ResultSide label="Predicted Winner" value={predictedWinner} tone="predicted" />
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full border border-red-400/30 bg-red-400/10 font-display text-sm font-bold text-red-300">
+            VS
+          </div>
+          <ResultSide label="Actual Winner" value={actualWinner} tone={battle.actualWinner ? 'actual' : 'pending'} />
+        </div>
+      </section>
+
+      <section className="mx-auto mt-5 flex max-w-4xl flex-col items-center justify-center gap-3 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-5 text-center md:flex-row">
+        <div>
+          <div className="font-mono text-[11px] uppercase tracking-[0.28em] text-slate-500">
+            Battle Outcome
+          </div>
+          <div className="mt-1 break-words font-display text-xl font-bold text-slate-100">
+            {outcomeText}
+          </div>
+        </div>
+        <span
+          className={`rounded-full px-3 py-1 font-mono text-[10px] font-bold uppercase tracking-[0.24em] ${
+            battle.actualWinner
+              ? statusCorrect
+                ? 'bg-emerald-400/15 text-emerald-300'
+                : 'bg-rose-400/15 text-rose-300'
+              : 'bg-amber-400/15 text-amber-300'
+          }`}
+        >
+          {statusLabel}
+        </span>
+      </section>
+
+      <div className="mx-auto mt-5 grid max-w-4xl gap-3 md:grid-cols-3">
+        <ResultMetaItem label="Winner" value={actualWinner} tone={battle.actualWinner ? 'success' : 'default'} />
+        <ResultMetaItem label="MVP" value={battle.mvp || 'Pending'} tone="accent" />
+        <ResultMetaItem label="Score" value={battle.finalScore || 'Pending'} />
+      </div>
+
+      <div className="mx-auto mt-5 max-w-3xl">
+        <div className="mb-2 flex items-center justify-between gap-4 font-mono text-xs uppercase tracking-[0.3em] text-slate-400">
+          <span>Confidence</span>
+          <span className="text-arena-400">{confidencePercent}%</span>
+        </div>
+        <div className="h-3 overflow-hidden rounded-full bg-white/10">
+          <div
+            className="h-full rounded-full bg-gradient-to-r from-arena-300 via-arena-400 to-arena-100 shadow-[0_0_20px_rgba(255,215,0,0.35)]"
+            style={{ width: `${confidencePercent}%` }}
+          />
+        </div>
+      </div>
+
+      <div className="mt-6 grid gap-4 lg:grid-cols-2">
+        <ResultDetail label={`${gymLeaderName} Team`} value={battle.gymLeaderLineup || 'Pending'} />
+        <ResultDetail label={`${challengerName} Team`} value={battle.challengerLineup || 'Pending'} />
+        <ResultDetail
+          label="Prediction Notes"
+          value={battle.reason || 'Prediction reason not saved yet.'}
+          wide
+        />
+      </div>
+
+      <div className="mt-5 flex flex-wrap items-center justify-center gap-3 text-sm text-slate-400">
+        <span>{battle.turns ? `${battle.turns} turns` : 'Turns pending'}</span>
+        {battle.mvp ? <span>MVP: {battle.mvp}</span> : null}
+        {battle.screenshotName ? <span className="text-slate-500">{battle.screenshotName}</span> : null}
+      </div>
+
+      <div className="mt-5 flex flex-wrap justify-center gap-3">
+        {battle.replayLink ? (
+          <a
+            href={battle.replayLink}
+            target="_blank"
+            rel="noreferrer"
+            className="rounded-full border border-cyan-400/40 bg-cyan-400/15 px-4 py-2 font-mono text-xs font-bold uppercase tracking-[0.24em] text-cyan-200 transition hover:bg-cyan-400/25"
+          >
+            Open Replay
+          </a>
+        ) : (
+          <span className="rounded-full border border-white/10 bg-white/5 px-4 py-2 font-mono text-xs uppercase tracking-[0.24em] text-slate-500">
+            Replay pending
+          </span>
+        )}
+
+        {battle.screenshotPreview ? (
+          <a
+            href={battle.screenshotPreview}
+            target="_blank"
+            rel="noreferrer"
+            className="rounded-full border border-emerald-400/40 bg-emerald-400/15 px-4 py-2 font-mono text-xs font-bold uppercase tracking-[0.24em] text-emerald-200 transition hover:bg-emerald-400/25"
+          >
+            View Screenshot
+          </a>
+        ) : (
+          <span className="rounded-full border border-white/10 bg-white/5 px-4 py-2 font-mono text-xs uppercase tracking-[0.24em] text-slate-500">
+            Screenshot pending
+          </span>
+        )}
+      </div>
+
+      {battle.screenshotPreview ? (
+        <a
+          href={battle.screenshotPreview}
+          target="_blank"
+          rel="noreferrer"
+          className="mx-auto mt-5 block max-w-3xl overflow-hidden rounded-2xl border border-white/10 bg-slate-950/50"
+        >
+          <img
+            src={battle.screenshotPreview}
+            alt={battle.screenshotName || `Proof for match ${battle.id}`}
+            className="max-h-72 w-full object-cover"
+          />
+        </a>
+      ) : null}
+    </article>
+  );
+}
+
+function ResultSide({ label, value, tone }) {
+  const toneClass =
+    tone === 'predicted'
+      ? 'text-arena-400'
+      : tone === 'actual'
+        ? 'text-emerald-300'
+        : 'text-slate-300';
+
+  return (
+    <div className="min-w-0">
+      <div className="font-mono text-xs uppercase tracking-[0.28em] text-slate-500">
+        {label}
+      </div>
+      <div className={`mt-2 break-words font-display text-2xl font-bold ${toneClass}`}>
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function ResultMetaItem({ label, value, tone = 'default' }) {
+  const toneClass =
+    tone === 'success'
+      ? 'text-emerald-200'
+      : tone === 'accent'
+        ? 'text-amber-200'
+        : 'text-slate-100';
+
+  return (
+    <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4 text-center">
+      <div className="font-mono text-[11px] uppercase tracking-[0.28em] text-slate-500">
+        {label}
+      </div>
+      <div className={`mt-2 break-words font-display text-lg font-bold ${toneClass}`}>
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function ResultDetail({ label, value, wide = false }) {
+  return (
+    <div className={`rounded-2xl border border-white/10 bg-white/[0.04] p-4 ${wide ? 'lg:col-span-2' : ''}`}>
+      <div className="font-mono text-[11px] uppercase tracking-[0.28em] text-slate-500">
+        {label}
+      </div>
+      <p className="mt-2 break-words font-mono text-sm leading-6 text-slate-300">
+        {value}
+      </p>
+    </div>
   );
 }
 
